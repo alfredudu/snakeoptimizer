@@ -815,6 +815,97 @@ function Write-SnakeOptimizerWindowsUpdatePolicyNote {
 }
 
 
+function Get-SnakeOptimizerWindowsUpdateControl {
+    <#
+    O que, além do acesso ao Windows Update, faz as Configurações dizerem "você está atualizado" enquanto há coisa
+    pendente, ou faz a versão nova (25H2, 26H2...) nunca aparecer: atualização automática desligada por política (comum
+    quando um RMM assume os patches), versão do Windows travada, atualização de versão bloqueada, adiamento e pausa.
+    Devolve uma lista de textos (vazia no normal).
+    #>
+    $notes = New-Object System.Collections.Generic.List[string]
+    $key = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate"
+
+    try {
+        $values = Get-ItemProperty -LiteralPath $key -ErrorAction SilentlyContinue
+        $au = Get-ItemProperty -LiteralPath "$key\AU" -ErrorAction SilentlyContinue
+        $ux = Get-ItemProperty -LiteralPath "HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings" -ErrorAction SilentlyContinue
+        $get = { param ($Object, $Name) [string](Get-SnakeOptimizerJsonValue -Object $Object -Name $Name -Default "") }
+
+        if ((& $get $au "NoAutoUpdate") -eq "1" -or (& $get $au "AUOptions") -eq "1") {
+            $notes.Add("Uma política desliga a atualização automática (AU\$(if ((& $get $au 'NoAutoUpdate') -eq '1') { 'NoAutoUpdate=1' } else { 'AUOptions=1' })): o Windows não procura nem baixa sozinho, e as Configurações podem dizer ""atualizado"" com base numa verificação antiga. Costuma ser o RMM ou o antivírus assumindo os patches.")
+        }
+        elseif ((& $get $au "AUOptions") -eq "2") {
+            $notes.Add("Uma política manda o Windows só avisar das atualizações (AUOptions=2): ele não baixa sozinho.")
+        }
+
+        if ((& $get $values "TargetReleaseVersion") -eq "1") {
+            $notes.Add("Uma política trava o Windows na versão $(& $get $values 'TargetReleaseVersionInfo') ($(& $get $values 'ProductVersion')): a versão nova nunca é oferecida enquanto ela existir.")
+        }
+
+        if ((& $get $values "DisableOSUpgrade") -eq "1") {
+            $notes.Add("Uma política bloqueia a atualização para a versão nova do Windows (DisableOSUpgrade=1).")
+        }
+
+        $defer = & $get $values "DeferFeatureUpdatesPeriodInDays"
+        if ($defer -and [int]$defer -gt 0) { $notes.Add("Uma política adia a versão nova do Windows em $defer dias.") }
+
+        $pause = & $get $ux "PauseUpdatesExpiryTime"
+        if ($pause) {
+            try { $until = [datetime]::Parse($pause, [Globalization.CultureInfo]::InvariantCulture).ToLocalTime() } catch { $until = $null }
+            if ($null -eq $until -or $until -gt (Get-Date)) { $notes.Add("As atualizações estão pausadas nas Configurações$(if ($until) { " até $($until.ToString('dd/MM/yyyy'))" }).") }
+        }
+    }
+    catch {
+        Write-Verbose "Controle do Windows Update: $($_.Exception.Message)"
+    }
+
+    return @($notes)
+}
+
+
+function Write-SnakeOptimizerWindowsUpdateControlNote {
+    # Escreve o que Get-SnakeOptimizerWindowsUpdateControl achou. Devolve $true quando escreveu.
+    $notes = @(Get-SnakeOptimizerWindowsUpdateControl)
+    foreach ($note in $notes) { Write-SnakeOptimizerStatus -Type Warning -Message $note }
+    return ($notes.Count -gt 0)
+}
+
+
+function Clear-SnakeOptimizerUpdateTransferQueues {
+    <#
+    O que deixa um download "baixando para sempre" mesmo com o cache refeito: a fila do BITS (trabalhos presos, de todos
+    os usuários) e o cache da Otimização de Entrega (pedaços corrompidos que ela continua oferecendo). Devolve linhas de
+    resultado para o resumo. Precisa do BITS ligado, então roda antes de parar os serviços.
+    #>
+    $rows = @()
+
+    try {
+        $jobs = @(Get-BitsTransfer -AllUsers -ErrorAction Stop)
+        $jobs | Remove-BitsTransfer -ErrorAction SilentlyContinue
+        $row = New-SnakeOptimizerResult -Kind Ok -Detail $(if ($jobs.Count) { "$($jobs.Count) downloads presos cancelados" } else { "vazia" })
+    }
+    catch {
+        $row = New-SnakeOptimizerResult -Kind Skipped -Detail "não foi possível ler: $($_.Exception.Message.TrimEnd('.'))"
+    }
+    $row.Etapa = "Fila de downloads (BITS)"
+    $rows += $row
+
+    if (Get-Command Delete-DeliveryOptimizationCache -ErrorAction SilentlyContinue) {
+        try {
+            Delete-DeliveryOptimizationCache -Force -ErrorAction Stop | Out-Null
+            $row = New-SnakeOptimizerResult -Kind Ok -Detail "limpo"
+        }
+        catch {
+            $row = New-SnakeOptimizerResult -Kind Skipped -Detail "não foi possível limpar: $($_.Exception.Message.TrimEnd('.'))"
+        }
+        $row.Etapa = "Cache da Otimização de Entrega"
+        $rows += $row
+    }
+
+    return $rows
+}
+
+
 function Write-SnakeOptimizerWindowsUpdateSearchHelp {
     <#
     O que fazer quando a consulta ao Windows Update falha, depois do motivo: a política que muda de onde vêm as
@@ -1403,6 +1494,11 @@ function Install-SnakeOptimizerWindowsUpdates {
 
         [void](Write-SnakeOptimizerUpdateSupportNote -Status $support)
 
+        # Explica por que as Configurações podem dizer "atualizado" enquanto a busca direta acha coisas pendentes.
+        if (Write-SnakeOptimizerWindowsUpdateControlNote) {
+            Write-SnakeOptimizerStatus -Type Info -Message "Por isso o Windows Update das Configurações pode mostrar ""atualizado"": o SnakeOptimizer pergunta direto ao serviço."
+        }
+
         # As opcionais (BrowseOnly: prévias e drivers opcionais) só aparecem quando o Windows Update não conhece o critério
         # que as deixa de fora; o Windows não as instala sozinho, então elas vêm desmarcadas e com o aviso.
         $options = @(
@@ -1565,6 +1661,10 @@ function Install-SnakeOptimizerPendingUpdates {
             }
             else {
                 [void](Write-SnakeOptimizerUpdateSupportNote -Status $support)
+
+                if (Write-SnakeOptimizerWindowsUpdateControlNote) {
+                    Write-SnakeOptimizerStatus -Type Info -Message "Por isso o Windows Update das Configurações pode mostrar ""atualizado"": o SnakeOptimizer pergunta direto ao serviço."
+                }
 
                 $download = [int64]0
                 foreach ($pending in @($chosen | Where-Object { -not $_.Downloaded })) { $download += [int64]$pending.Size }
@@ -1896,8 +1996,10 @@ function Repair-SnakeOptimizerWindowsUpdate {
             Write-SnakeOptimizerStatus -Type Warning -Message "O serviço Windows Update Medic (WaaSMedicSvc) está desativado: desfaça pelo programa que o desativou."
         }
 
-        if (Write-SnakeOptimizerWindowsUpdatePolicyNote) {
-            Write-SnakeOptimizerStatus -Type Info -Message "O reparo não muda políticas."
+        $policyNote = Write-SnakeOptimizerWindowsUpdatePolicyNote
+        $controlNote = Write-SnakeOptimizerWindowsUpdateControlNote
+        if ($policyNote -or $controlNote) {
+            Write-SnakeOptimizerStatus -Type Info -Message "O reparo não muda políticas: se uma delas explica o problema, desfaça por quem a criou (RMM, GPO, bloqueador)."
         }
 
         Write-Host ""
@@ -1970,6 +2072,10 @@ function Repair-SnakeOptimizerWindowsUpdate {
         $stopProblem = ""
 
         try {
+            # Downloads presos na fila do BITS e na Otimização de Entrega (o "fica baixando e nunca termina").
+            Write-Progress -Activity $title -Status "cancelando downloads presos"
+            $rows += @(Clear-SnakeOptimizerUpdateTransferQueues)
+
             Write-Progress -Activity $title -Status "desligando os serviços do Windows Update"
 
             # Quem depende de um serviço para junto com ele (Stop-Service -Force): esses voltam a ligar no fim.
@@ -2066,7 +2172,12 @@ function Repair-SnakeOptimizerWindowsUpdate {
             $final = New-SnakeOptimizerResult -Kind Warning -Detail "cache refeito em parte; $names aponta para outro lugar e ficou como está" -Title $title
         }
         else {
-            Write-SnakeOptimizerStatus -Type Info -Message "Agora use Atualizações > Instalar atualizações do Windows; a primeira busca demora mais."
+            # Pede ao Windows uma busca nova, para as Configurações saírem da verificação antiga.
+            try { Start-Process -FilePath (Join-Path $env:SystemRoot "System32\UsoClient.exe") -ArgumentList "StartInteractiveScan" -WindowStyle Hidden -ErrorAction Stop }
+            catch { Write-Verbose "UsoClient: $($_.Exception.Message)" }
+
+            Write-SnakeOptimizerStatus -Type Info -Message "Uma busca nova foi pedida ao Windows. Para instalar, use Atualizações > Instalar atualizações do Windows; a primeira busca demora mais."
+            Write-SnakeOptimizerStatus -Type Info -Message "Se a versão nova (ex.: 26H2) continuar sem aparecer, a Microsoft libera aos poucos e segura em PCs com incompatibilidade conhecida; o Assistente de Instalação do Windows 11 (site da Microsoft) instala na hora."
             $final = New-SnakeOptimizerResult -Kind Ok -Detail "cache do Windows Update refeito e serviços ligados de novo" -Title $title
             [void](Set-SnakeOptimizerResultView -Result $final -Headline "Cache do Windows Update refeito" -Note "Os serviços estão ligados de novo. A primeira busca por atualizações demora mais." `
                     -Next "updates.install" -NextLabel "Procurar atualizações")

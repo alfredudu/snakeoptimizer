@@ -1,5 +1,10 @@
 # Histórico de mudanças do SnakeOptimizer
 
+## 1.3 — 20/11/2026
+
+- **Corrigir o Windows Update** agora também resolve o "fica baixando e nunca termina": cancela os downloads presos na fila do BITS, limpa o cache da Otimização de Entrega e, no fim, pede ao Windows uma busca nova.
+- Detecta e explica as políticas que travam o Windows Update ou escondem a versão nova (atualização automática desligada, versão travada, DisableOSUpgrade, adiamento, pausa). Elas aparecem no reparo e na instalação de atualizações, e explicam por que as Configurações dizem "atualizado" enquanto o SnakeOptimizer acha coisas pendentes.
+
 ## 1.2 — 20/11/2026
 
 - **Modo silencioso para RMM** (`SO_MODE=Run`, `SO_TASK=...`): limpeza, DISM/SFC, WinSxS, fila de impressão, hora, DNS e rede, sem janela e sem perguntas, com código de saída.

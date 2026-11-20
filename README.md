@@ -39,7 +39,7 @@ Ações mais usadas (lista completa com `-ListActions`):
 | `cleanup.components` | Limpar WinSxS |
 | `repair.dism-sfc` | Reparar o Windows (DISM + SFC) |
 | `updates.winget` | Atualizar programas (winget) |
-| `updates.repair` | Corrigir o Windows Update |
+| `updates.repair` | Corrigir o Windows Update (cache, downloads presos, políticas que travam a versão nova) |
 | `network.repair` | Reparar rede e DNS (IP, DNS, ARP, Winsock, TCP/IP) |
 | `network.proxy-reset` | Remover proxy travado |
 | `repair.office` | Office e Teams: atualizar, "com problema / não atualiza", cache, login/ativação, reparo rápido ou online, cache do Teams |
