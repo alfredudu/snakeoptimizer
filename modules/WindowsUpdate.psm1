@@ -205,6 +205,47 @@ $isUpdateError = {
     return $false
 }
 
+# Andamento de um trabalho (download ou instalação) para a tela: a atualização da vez, quanto dela já foi, a fase do
+# download e, em $State.Finished, cada uma que terminou (com o código do Windows), na hora em que termina.
+$track = {
+    param ($Progress, $Collection, $Phase, [ref]$Reported)
+
+    $State.Percent = [int]$Progress.PercentComplete
+    $index = [int]$Progress.CurrentUpdateIndex
+    $State.Index = $index + 1
+
+    try { $State.Current = [string]$Collection.Item($index).Title } catch { }
+    try { $State.CurrentPercent = [int]$Progress.CurrentUpdatePercentComplete } catch { $State.CurrentPercent = -1 }
+
+    if ($Phase -eq "Baixando") {
+        try {
+            $State.Bytes = [int64]$Progress.CurrentUpdateBytesDownloaded
+            $State.BytesTotal = [int64]$Progress.CurrentUpdateBytesToDownload
+            $State.DownloadPhase = [int]$Progress.CurrentUpdateDownloadPhase
+        }
+        catch { }
+    }
+
+    # As anteriores à da vez já terminaram.
+    while ($Reported.Value -lt $index) {
+        $code = 0
+        try { $code = [int]$Progress.GetUpdateResult($Reported.Value).ResultCode } catch { }
+        [void]$State.Finished.Add([PSCustomObject]@{ Phase = $Phase; Title = [string]$Collection.Item($Reported.Value).Title; Code = $code })
+        $Reported.Value++
+    }
+}
+
+# As que terminaram junto com o trabalho (a última, ou todas, sem andamento).
+$finish = {
+    param ($Result, $Collection, $Phase, $From)
+
+    for ($i = $From; $i -lt $Collection.Count; $i++) {
+        $code = 0
+        try { $code = [int]$Result.GetUpdateResult($i).ResultCode } catch { }
+        [void]$State.Finished.Add([PSCustomObject]@{ Phase = $Phase; Title = [string]$Collection.Item($i).Title; Code = $code })
+    }
+}
+
 try {
 __SESSION__
 
@@ -289,17 +330,13 @@ __SEARCH__
         $downloader.Updates = $toDownload
 
         $job = $null
+        $reported = 0
 
         try { $job = $downloader.BeginDownload($null, $null, $null) } catch { if (& $isUpdateError $_.Exception) { throw }; $job = $null }
 
         if ($null -ne $job) {
             while (-not $job.IsCompleted) {
-                $progress = $job.GetProgress()
-                $State.Percent = [int]$progress.PercentComplete
-                $State.Index = [int]$progress.CurrentUpdateIndex + 1
-
-                try { $State.Current = [string]$toDownload.Item([int]$progress.CurrentUpdateIndex).Title } catch { }
-
+                & $track $job.GetProgress() $toDownload "Baixando" ([ref]$reported)
                 Start-Sleep -Milliseconds 500
             }
 
@@ -308,6 +345,8 @@ __SEARCH__
         else {
             $downloadResult = $downloader.Download()
         }
+
+        & $finish $downloadResult $toDownload "Baixando" $reported
 
         $State.Percent = 100
 
@@ -351,17 +390,15 @@ __SEARCH__
     try { $installer.AllowSourcePrompts = $false } catch { }
 
     $job = $null
+    $reported = 0
+    $State.Bytes = 0
+    $State.BytesTotal = 0
 
     try { $job = $installer.BeginInstall($null, $null, $null) } catch { if (& $isUpdateError $_.Exception) { throw }; $job = $null }
 
     if ($null -ne $job) {
         while (-not $job.IsCompleted) {
-            $progress = $job.GetProgress()
-            $State.Percent = [int]$progress.PercentComplete
-            $State.Index = [int]$progress.CurrentUpdateIndex + 1
-
-            try { $State.Current = [string]$toInstall.Item([int]$progress.CurrentUpdateIndex).Title } catch { }
-
+            & $track $job.GetProgress() $toInstall "Instalando" ([ref]$reported)
             Start-Sleep -Milliseconds 500
         }
 
@@ -370,6 +407,8 @@ __SEARCH__
     else {
         $installResult = $installer.Install()
     }
+
+    & $finish $installResult $toInstall "Instalando" $reported
 
     $State.Percent = 100
 
@@ -978,27 +1017,66 @@ function Wait-SnakeOptimizerUpdateJob {
 
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     $lastKey = ""
+    $shown = 0
+    $itemKey = ""
+    $itemSince = [System.Diagnostics.Stopwatch]::StartNew()
 
-    while (-not $Handle.AsyncWaitHandle.WaitOne(1000)) {
+    while ($true) {
+        $done = $Handle.AsyncWaitHandle.WaitOne(1000)
+
+        # Cada atualização que terminou vira uma linha no registro, na hora: "Baixada: ...", "Instalada: ...".
+        while ($shown -lt $State.Finished.Count) {
+            $entry = $State.Finished[$shown]
+            $shown++
+            $verb = $(if ($entry.Phase -eq "Baixando") { "Baixada" } else { "Instalada" })
+
+            switch ([int]$entry.Code) {
+                2 { Write-SnakeOptimizerStatus -Type Success -Message "${verb}: $($entry.Title)" }
+                3 { Write-SnakeOptimizerStatus -Type Warning -Message "$verb com ressalvas: $($entry.Title)" }
+                5 { Write-SnakeOptimizerStatus -Type Warning -Message "Interrompida: $($entry.Title)" }
+                4 { Write-SnakeOptimizerStatus -Type Error -Message "Falhou ($(if ($entry.Phase -eq 'Baixando') { 'download' } else { 'instalação' })): $($entry.Title)" }
+                default { }
+            }
+        }
+
+        if ($done) { break }
+
         if ($stopwatch.Elapsed.TotalMinutes -ge $TimeoutMinutes) {
             return $false
         }
 
-        $key = "$($State.Phase)|$($State.Index)|$($State.Percent)|$($State.Current)"
-
-        if ($key -eq $lastKey) { continue }
-
-        $lastKey = $key
-
         if ($State.Phase -in "Baixando", "Instalando") {
             $activity = $(if ($State.Phase -eq "Baixando") { "Baixando as atualizações" } else { "Instalando as atualizações" })
-            $status = "$($State.Index) de $($State.Total)"
 
+            # Há quanto tempo a atualização da vez está nisso (o "travou?" de quem olha).
+            $nowKey = "$($State.Phase)|$($State.Index)"
+            if ($nowKey -ne $itemKey) { $itemKey = $nowKey; $itemSince.Restart() }
+            $minutes = [int][math]::Floor($itemSince.Elapsed.TotalMinutes)
+
+            $status = "$([math]::Max(1, [int]$State.Index)) de $($State.Total)"
             if (-not [string]::IsNullOrWhiteSpace([string]$State.Current)) { $status += ": $($State.Current)" }
 
-            Write-Progress -Activity $activity -Status $status -PercentComplete ([math]::Max(0, [math]::Min(100, [int]$State.Percent)))
+            $detail = @()
+            if ($State.Phase -eq "Baixando" -and [int]$State.DownloadPhase -eq 1) { $detail += "preparando o download" }
+            elseif ($State.Phase -eq "Baixando" -and [int]$State.DownloadPhase -eq 3) { $detail += "conferindo o arquivo" }
+            elseif ($State.Phase -eq "Baixando" -and [int64]$State.BytesTotal -gt 0) {
+                $detail += "$(Format-SnakeOptimizerBytes -Bytes ([int64]$State.Bytes) -ZeroText '0 MB') de $(Format-SnakeOptimizerBytes -Bytes ([int64]$State.BytesTotal))"
+            }
+            if ([int]$State.CurrentPercent -ge 0) { $detail += "$([int]$State.CurrentPercent)% desta" }
+            if ($minutes -ge 1) { $detail += "há $minutes min" }
+            if ($detail.Count -gt 0) { $status += " · $($detail -join ' · ')" }
+
+            # Parado em 0% muito tempo quase sempre é o Windows montando a atualização cumulativa, não travamento.
+            if ($minutes -ge 5 -and [int]$State.CurrentPercent -le 0) { $status += " (o Windows ainda prepara esta; a cumulativa demora)" }
+
+            $key = "$status|$($State.Percent)"
+            if ($key -ne $lastKey) {
+                $lastKey = $key
+                Write-Progress -Activity $activity -Status $status -PercentComplete ([math]::Max(0, [math]::Min(100, [int]$State.Percent)))
+            }
         }
-        else {
+        elseif ($lastKey -ne "preparando") {
+            $lastKey = "preparando"
             # Antes de baixar, o Windows Update confere de novo as escolhidas, o que pode demorar.
             Write-Progress -Activity "Preparando a instalação" -Status "o Windows Update confere as atualizações escolhidas"
         }
@@ -1031,6 +1109,11 @@ function Invoke-SnakeOptimizerUpdateInstall {
             Index          = 0
             Total          = 0
             Current        = ""
+            CurrentPercent = -1
+            Bytes          = [int64]0
+            BytesTotal     = [int64]0
+            DownloadPhase  = 0
+            Finished       = (New-Object System.Collections.ArrayList)
             Error          = ""
             ErrorHResult   = 0
             DownloadCode   = 0

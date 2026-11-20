@@ -189,7 +189,32 @@ try {
     # Uma janela só: se já há uma aberta, o pedido (e a ação, se veio do monitor) vai para ela, e esta abertura termina.
     # A reabertura pedida por uma janela aberta (-Handover) espera por ela, que fecha logo depois de abrir esta.
     if (-not (Enter-SnakeOptimizerWindowLock -WaitMilliseconds $(if ($Handover) { 15000 } else { 0 }))) {
-        if (Send-SnakeOptimizerWindowRequest -Action $Action) { exit 0 }
+        if (Send-SnakeOptimizerWindowRequest -Action $Action) {
+            # A janela aberta lê o pedido em meio segundo. Se em 6 segundos não leu, ela está travada ou ocupada demais:
+            # sair calado aqui pareceria que o SnakeOptimizer "não abre". Diz qual processo é e oferece fechá-lo.
+            $requestPath = Get-SnakeOptimizerWindowRequestPath
+            for ($i = 0; $i -lt 12 -and (Test-Path -LiteralPath $requestPath); $i++) { Start-Sleep -Milliseconds 500 }
+            if (-not (Test-Path -LiteralPath $requestPath)) { exit 0 }
+
+            $stuck = @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" -ErrorAction SilentlyContinue |
+                    Where-Object { $_.ProcessId -ne $PID -and [string]$_.CommandLine -match 'SnakeOptimizer\.Gui\.ps1' })
+            $ids = ($stuck | ForEach-Object { $_.ProcessId }) -join ", "
+
+            $text = "O SnakeOptimizer já está aberto, mas a janela não respondeu$(if ($ids) { " (processo powershell.exe, PID $ids)" })." +
+                "`n`nSe ela está no meio de uma ação longa (como instalar atualizações), procure-a na barra de tarefas e espere." +
+                "`n`nFechar a janela antiga e abrir uma nova? O que ela estava fazendo é interrompido (uma instalação do Windows Update já iniciada continua pelo próprio Windows)."
+            $answer = [System.Windows.MessageBox]::Show($text, "SnakeOptimizer", [System.Windows.MessageBoxButton]::YesNo, [System.Windows.MessageBoxImage]::Warning)
+
+            if ($answer -ne [System.Windows.MessageBoxResult]::Yes -or $stuck.Count -eq 0) { exit 0 }
+
+            foreach ($process in $stuck) { Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue }
+            Remove-Item -LiteralPath $requestPath -Force -ErrorAction SilentlyContinue
+
+            if (-not (Enter-SnakeOptimizerWindowLock -WaitMilliseconds 10000)) {
+                Show-GuiStartupMessage -Text "Não foi possível fechar a janela antiga (PID $ids). Feche-a pelo Gerenciador de Tarefas e abra o SnakeOptimizer de novo."
+                exit 1
+            }
+        }
     }
     elseif ($windowOpen -and ((-not $isAdmin -and -not $Relaunched) -or -not $isSta)) {
         # A janela que estava aberta fechou enquanto esta carregava: faz o que a partida faria (pedir o Administrador e,
