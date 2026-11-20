@@ -74,6 +74,7 @@ Ou pela janela: **Sobre o SnakeOptimizer > Versão nova e instalação no PC**. 
 
 - uma cópia fixa em `%ProgramData%\SnakeOptimizer\app` (só Administradores alteram);
 - a tarefa **`\SnakeOptimizer\Atualizador`** (SYSTEM), que roda 3 minutos depois de ligar o PC e a cada 6 horas. Ela só baixa quando há commit novo na `main` e não troca nada com o SnakeOptimizer aberto (tenta de novo depois). O registro fica em `%ProgramData%\SnakeOptimizer\atualizador.log`;
+- o **ícone na bandeja** (perto do relógio) para todos os usuários, que avisa quando o disco enche, a proteção desliga ou falta manutenção, e abre o SnakeOptimizer com um clique. Cada usuário pode desligá-lo na própria conta;
 - atalhos **SnakeOptimizer** na Área de Trabalho pública e no Menu Iniciar, que abrem como Administrador e conferem a versão antes de abrir.
 
 O SnakeOptimizer não vira um *serviço* do Windows no sentido estrito: é PowerShell, e um serviço não pode mostrar janela. A tarefa do Agendador como SYSTEM faz esse papel, como no CCleaner e em outros utilitários. Para remover: `$env:SO_MODE='Uninstall'; irm links.snaketech.com.br/otimizar | iex` (mantém relatórios e histórico).

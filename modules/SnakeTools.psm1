@@ -1713,7 +1713,7 @@ function Show-SnakeOptimizerInstallation {
 
     $options = @(
         @{ Key = "1"; Label = $(if ($state.Updater) { "Reinstalar / reparar a instalação" } else { "Instalar no PC com atualização automática" }); Accent = (-not $state.Updater)
-            Description = "Cópia fixa em $($state.Root), tarefa Atualizador (SYSTEM, ao ligar o PC e a cada 6 horas) e atalhos na Área de Trabalho e no Menu Iniciar para todos os usuários, abrindo como Administrador." },
+            Description = "Cópia fixa em $($state.Root), tarefa Atualizador (SYSTEM, ao ligar o PC e a cada 6 horas), ícone na bandeja (perto do relógio) e atalhos na Área de Trabalho e no Menu Iniciar para todos os usuários." },
         @{ Key = "2"; Label = "Desinstalar do PC"; Description = "Remove o Atualizador, a manutenção automática e os atalhos. Os relatórios e o histórico ficam; a pasta do app sai quando o SnakeOptimizer estiver fechado." },
         @{ Key = "X"; Label = "Voltar"; Exit = $true }
     )

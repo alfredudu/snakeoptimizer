@@ -92,7 +92,7 @@ $AppName = "SnakeOptimizer"
 $TaskPath = "\SnakeOptimizer\"
 $UpdaterTask = "Atualizador"
 # O que a ultima instalacao fez (Updated, UpToDate, InUse, Offline, Local) e o commit publicado.
-$UpdateInfo = @{ Outcome = ""; Commit = $null }
+$UpdateInfo = @{ Outcome = ""; Commit = $null; AgentsStopped = $false; AgentRestarted = $false }
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"   # a barra de progresso deixa o Invoke-WebRequest do PS 5.1 muito lento
@@ -238,9 +238,6 @@ function Install-App {
             $UpdateInfo.Outcome = "InUse"
             return $appDir
         }
-        # So o monitor da bandeja: fecha (ele volta no proximo logon) para poder trocar os arquivos.
-        foreach ($p in $open) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }
-        if ($open.Count -gt 0) { Start-Sleep -Seconds 2 }
     }
 
     $stage = Join-Path ([IO.Path]::GetTempPath()) "$AppName-$([guid]::NewGuid().ToString('N'))"
@@ -285,7 +282,17 @@ function Install-App {
         Get-ChildItem -LiteralPath $Root -Directory -Filter "app.old-*" -ErrorAction SilentlyContinue |
             ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
 
-        $inUse = (Test-Path -LiteralPath $appDir) -and (@(Get-AppProcesses $appDir).Count -gt 0)
+        $inUse = $false
+        if (Test-Path -LiteralPath $appDir) {
+            $open = @(Get-AppProcesses $appDir)
+            $inUse = @($open | Where-Object { $_.CommandLine -notmatch 'Agent\.ps1' }).Count -gt 0
+            # So o icone da bandeja usa a pasta: fecha para trocar os arquivos (o launcher o reabre em seguida).
+            if (-not $inUse -and $open.Count -gt 0) {
+                foreach ($p in $open) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }
+                $UpdateInfo.AgentsStopped = $true
+                Start-Sleep -Seconds 2
+            }
+        }
         if (-not $inUse -and (Test-Path -LiteralPath $appDir)) {
             # Renomeia antes de apagar: se algo estiver preso, a pasta antiga fica inteira (nunca meio apagada).
             $old = Join-Path $Root "app.old-$([guid]::NewGuid().ToString('N').Substring(0, 8))"
@@ -338,11 +345,7 @@ function Get-GuiArguments {
     return $guiArgs
 }
 
-function Start-GuiInUserSession {
-    # SYSTEM nao tem area de trabalho visivel. Uma tarefa agendada com o token interativo do usuario logado abre a janela
-    # na tela dele (o tecnico ve pelo acesso remoto). RunLevel Highest: se o usuario for administrador, abre elevada.
-    param ([string]$AppDir)
-
+function Get-LoggedOnUser {
     $user = (Get-CimInstance -ClassName Win32_ComputerSystem).UserName
     if (-not $user) {
         # Sessoes RDP nao aparecem em Win32_ComputerSystem: pega o dono do explorer.exe.
@@ -352,6 +355,47 @@ function Start-GuiInUserSession {
             if ($owner.User) { $user = "$($owner.Domain)\$($owner.User)" }
         }
     }
+    return $user
+}
+
+$AgentRunKey = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run"
+$AgentRunName = "SnakeOptimizer Monitor"
+
+function Get-AgentCommandLine([string]$Root) {
+    $agent = Join-Path $Root "app\$AppName.Agent.ps1"
+    return "`"$(Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe')`" -NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File `"$agent`" -Machine"
+}
+
+function Start-AgentInUserSession {
+    # Abre o icone da bandeja agora na sessao do usuario logado, sem elevacao (o monitor nunca roda como Administrador).
+    param ([string]$Root)
+
+    $user = Get-LoggedOnUser
+    if (-not $user) { return $false }
+    $agent = Join-Path $Root "app\$AppName.Agent.ps1"
+    if (-not (Test-Path -LiteralPath $agent)) { return $false }
+
+    $taskName = "$AppName-Monitor-$([guid]::NewGuid().ToString('N').Substring(0, 8))"
+    try {
+        $taskAction = New-ScheduledTaskAction -Execute (Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe") `
+            -Argument "-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File `"$agent`" -Machine"
+        $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
+        $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
+        Register-ScheduledTask -TaskName $taskName -Action $taskAction -Principal $principal -Settings $settings -Force | Out-Null
+        Start-ScheduledTask -TaskName $taskName
+        Start-Sleep -Seconds 3
+        return $true
+    }
+    catch { return $false }
+    finally { Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue }
+}
+
+function Start-GuiInUserSession {
+    # SYSTEM nao tem area de trabalho visivel. Uma tarefa agendada com o token interativo do usuario logado abre a janela
+    # na tela dele (o tecnico ve pelo acesso remoto). RunLevel Highest: se o usuario for administrador, abre elevada.
+    param ([string]$AppDir)
+
+    $user = Get-LoggedOnUser
     if (-not $user) { throw "Nenhum usuario logado para mostrar a janela. Use -Mode Check ou -Mode Report." }
 
     $taskName = "$AppName-Launch-$([guid]::NewGuid().ToString('N').Substring(0, 8))"
@@ -445,11 +489,17 @@ function Install-Machine {
 
     Register-Updater -Root $Root
     $links = @(New-AppShortcuts -Root $Root)
-    Write-UpdateLog $Root "Instalado (Atualizador ligado)."
+
+    # Icone na bandeja (perto do relogio) para todos os usuarios, ao entrar no Windows; e ja abre agora.
+    Set-ItemProperty -LiteralPath $AgentRunKey -Name $AgentRunName -Value (Get-AgentCommandLine $Root) -Type String
+    $trayNow = Start-AgentInUserSession -Root $Root
+    Write-UpdateLog $Root "Instalado (Atualizador e icone da bandeja ligados)."
 
     Write-Step "Instalado em $Root" Green
     Write-Step "Atualizador: tarefa $TaskPath$UpdaterTask (SYSTEM), ao ligar o PC e a cada 6 horas." Green
     foreach ($l in $links) { Write-Step "Atalho: $l" Green }
+    Write-Step "Icone na bandeja: abre com o Windows para todos os usuarios$(if ($trayNow) { '; ja aberto agora' } else { '; aparece no proximo logon' })." Green
+    Write-Step "Se o icone estiver escondido: clique na setinha ^ perto do relogio e arraste-o para a barra." Gray
     Write-Step "Para a manutencao diaria/semanal: abra o SnakeOptimizer > Manutencao > Manutencao automatica."
 }
 
@@ -466,7 +516,13 @@ function Uninstall-Machine {
         if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue; Write-Step "Atalho removido: $path" }
     }
 
+    Remove-ItemProperty -LiteralPath $AgentRunKey -Name $AgentRunName -ErrorAction SilentlyContinue
     $appDir = Join-Path $Root "app"
+    foreach ($p in @(Get-AppProcesses $appDir | Where-Object { $_.CommandLine -match 'Agent\.ps1' })) {
+        Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+    Write-Step "Icone da bandeja desligado."
+    Start-Sleep -Seconds 1
     if (@(Get-AppProcesses $appDir).Count -gt 0) {
         Write-Step "O SnakeOptimizer esta aberto: a pasta $appDir fica. Feche-o e rode a desinstalacao de novo para apaga-la." Yellow
     }
@@ -497,6 +553,8 @@ try {
     # Sem Administrador, a copia instalada em ProgramData e so leitura: usa como esta (o Atualizador a mantem em dia).
     if (-not (Test-IsAdmin) -and $root -like "$env:ProgramData*") { $NoUpdate = $true }
     $appDir = Install-App -Root $root
+    # O icone da bandeja foi fechado para trocar os arquivos: volta agora, ja na versao nova.
+    if ($UpdateInfo.AgentsStopped) { $UpdateInfo.AgentRestarted = [bool](Start-AgentInUserSession -Root $root) }
     $ps = Get-WindowsPowerShellPath
 
     if ($ListActions) {
@@ -557,6 +615,8 @@ try {
                 default { "Nada feito ($($UpdateInfo.Outcome))." }
             }
             if (-not $UpdateInfo.Commit -and $UpdateInfo.Outcome -eq "Updated") { $text = "Atualizado (sem consultar o commit; limite do GitHub)." }
+            # O icone da bandeja foi fechado para a troca: volta agora (com a versao nova).
+            if ($UpdateInfo.AgentRestarted) { $text += " Icone da bandeja reaberto." }
             Write-UpdateLog $root $text
             Write-Step $text Green
             $global:LASTEXITCODE = $(if ($UpdateInfo.Outcome -in "Updated", "UpToDate") { 0 } else { 1 })

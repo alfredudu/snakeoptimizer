@@ -1,5 +1,10 @@
 # Histórico de mudanças do SnakeOptimizer
 
+## 1.5.1 — 20/11/2026
+
+- A instalação no PC liga o **ícone na bandeja** (perto do relógio) para todos os usuários e já o abre na hora. Quem desligar o monitor na própria conta (Sobre > Monitor na bandeja) fica de fora, mesmo com a entrada do PC.
+- Ao atualizar, o ícone da bandeja é fechado para a troca dos arquivos e reaberto em seguida, já na versão nova. A desinstalação o remove.
+
 ## 1.5 — 20/11/2026
 
 - **Instalar no PC com atualização automática** (`-Mode Install`, ou Sobre > Versão nova e instalação no PC): cópia fixa em `%ProgramData%\SnakeOptimizer`, tarefa **Atualizador** (SYSTEM, ao ligar o PC e a cada 6 horas) e atalhos para todos os usuários, que abrem como Administrador. `-Mode Uninstall` remove tudo, menos relatórios e histórico.

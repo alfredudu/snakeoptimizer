@@ -7,6 +7,8 @@
 
 $script:SnakeOptimizerAgentRunKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
 $script:SnakeOptimizerAgentRunName = "SnakeOptimizer Monitor"
+# A entrada para todos os usuários, gravada pela instalação no PC (launch.ps1 -Mode Install).
+$script:SnakeOptimizerAgentMachineRunKey = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run"
 # Onde o Gerenciador de Tarefas (aba Inicializar) marca uma entrada de Run como desativada.
 $script:SnakeOptimizerAgentApprovedKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
 $script:SnakeOptimizerAgentStopEvent = "Local\SnakeOptimizer.Agent.Stop"
@@ -47,10 +49,16 @@ function Get-SnakeOptimizerAgentRunState {
     Inicializar: o Windows não roda a entrada).
     #>
     $value = [string](Get-SnakeOptimizerRegistryValueOrNull -Path $script:SnakeOptimizerAgentRunKey -Name $script:SnakeOptimizerAgentRunName)
-
-    if ([string]::IsNullOrWhiteSpace($value)) { return "Off" }
-
     $script = Get-SnakeOptimizerAgentScriptPath
+
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        # Instalado no PC: a entrada para todos os usuários vale, a não ser que esta conta tenha desligado o monitor.
+        $machine = [string](Get-SnakeOptimizerRegistryValueOrNull -Path $script:SnakeOptimizerAgentMachineRunKey -Name $script:SnakeOptimizerAgentRunName)
+        if ($machine -and $machine.IndexOf($script, [StringComparison]::OrdinalIgnoreCase) -ge 0 -and (Test-Path -LiteralPath $script -PathType Leaf) -and -not (Test-SnakeOptimizerAgentOptedOut)) {
+            return "On"
+        }
+        return "Off"
+    }
 
     if ($value.IndexOf($script, [StringComparison]::OrdinalIgnoreCase) -lt 0 -or -not (Test-Path -LiteralPath $script -PathType Leaf)) {
         return "Elsewhere"
@@ -64,6 +72,12 @@ function Get-SnakeOptimizerAgentRunState {
     if ($first -is [byte] -and ($first -band 1) -eq 1) { return "Disabled" }
 
     return "On"
+}
+
+
+function Test-SnakeOptimizerAgentOptedOut {
+    # Se esta conta desligou o monitor (vale contra a entrada do PC, que só um Administrador remove).
+    return ([string](Get-SnakeOptimizerSetting -Name "AgentOptOut" -Default "") -eq "1")
 }
 
 
@@ -191,6 +205,8 @@ function Enable-SnakeOptimizerAgent {
         throw "o Windows não deixou gravar a entrada que faz o monitor abrir com o Windows"
     }
 
+    [void](Set-SnakeOptimizerSetting -Name "AgentOptOut" -Value "")
+
     # Desativado antes no Gerenciador de Tarefas, o Windows continuaria sem rodar a entrada.
     try { Remove-SnakeOptimizerRegistryValue -Path $script:SnakeOptimizerAgentApprovedKey -Name $script:SnakeOptimizerAgentRunName } catch { Write-Verbose "Marca de inicialização: $($_.Exception.Message)" }
 
@@ -237,6 +253,9 @@ function Disable-SnakeOptimizerAgent {
     }
 
     try { Remove-SnakeOptimizerRegistryValue -Path $script:SnakeOptimizerAgentApprovedKey -Name $script:SnakeOptimizerAgentRunName } catch { Write-Verbose "Marca de inicialização: $($_.Exception.Message)" }
+
+    # Com o SnakeOptimizer instalado no PC, a entrada para todos os usuários continua: esta conta fica de fora.
+    [void](Set-SnakeOptimizerSetting -Name "AgentOptOut" -Value "1")
 
     return (Stop-SnakeOptimizerAgent)
 }

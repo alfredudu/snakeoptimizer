@@ -8,7 +8,10 @@
     para acelerar, limpar ou verificar o PC. Ligue e desligue em Sobre o SnakeOptimizer > Monitor na bandeja.
 #>
 [CmdletBinding()]
-param ()
+param (
+    # Aberto pela entrada do PC (instalação para todos os usuários): respeita quem desligou o monitor na própria conta.
+    [switch]$Machine
+)
 
 $ErrorActionPreference = "Continue"
 
@@ -57,6 +60,11 @@ try {
 catch {
     $script:Mutex.ReleaseMutex()
     exit 1
+}
+
+if ($Machine -and (Test-SnakeOptimizerAgentOptedOut)) {
+    $script:Mutex.ReleaseMutex()
+    exit 0
 }
 
 $script:StopSignal = New-Object System.Threading.EventWaitHandle($false, [System.Threading.EventResetMode]::AutoReset, (Get-SnakeOptimizerAgentStopEventName))
