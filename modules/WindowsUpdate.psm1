@@ -151,11 +151,17 @@ foreach ($update in $found.Updates) {
         $upgrade = $false
     }
 
+    # A atualização cumulativa informa como máximo o pacote completo com todas as variantes (dezenas de GB), mas o
+    # Windows baixa só a parte que falta (centenas de MB). Acima de 6 GB, fora uma versão nova do Windows, o número não
+    # serve para nada: fica 0 ("o Windows calcula na hora").
+    $size = [int64]$update.MaxDownloadSize
+    if ($size -gt 6GB -and -not $upgrade) { $size = [int64]0 }
+
     [PSCustomObject]@{
         Id          = [string]$update.Identity.UpdateID
         Title       = [string]$update.Title
         Kb          = $kb
-        Size        = [int64]$update.MaxDownloadSize
+        Size        = $size
         Downloaded  = [bool]$update.IsDownloaded
         BrowseOnly  = $browseOnly
         Driver      = $driver
@@ -657,7 +663,36 @@ function Get-SnakeOptimizerUpdateSizeText {
     if ($Update.Downloaded) { return "já baixada" }
     if ([int64]$Update.Size -gt 0) { return "até $(Format-SnakeOptimizerBytes -Bytes ([int64]$Update.Size))" }
 
-    return "tamanho não informado"
+    return "tamanho calculado pelo Windows na hora"
+}
+
+
+function Get-SnakeOptimizerUpdateDownloadText {
+    # A linha "A baixar": a soma do que se sabe, avisando quando alguma atualização não tem tamanho informado.
+    param ([object[]]$Updates)
+
+    $pending = @($Updates | Where-Object { -not $_.Downloaded })
+    if ($pending.Count -eq 0) { return "nada (já estão baixadas)" }
+
+    $bytes = [int64]0
+    foreach ($update in $pending) { $bytes += [int64]$update.Size }
+    $unknown = @($pending | Where-Object { [int64]$_.Size -le 0 }).Count
+
+    if ($bytes -le 0) { return "tamanho calculado pelo Windows na hora" }
+    if ($unknown -gt 0) { return "até $(Format-SnakeOptimizerBytes -Bytes $bytes) + $(Format-SnakeOptimizerCount -Count $unknown -One 'atualização' -Many 'atualizações') com tamanho calculado na hora" }
+
+    return "até $(Format-SnakeOptimizerBytes -Bytes $bytes)"
+}
+
+
+function Request-SnakeOptimizerWindowsUpdateScan {
+    <#
+    Pede ao Windows a mesma busca do botão "Verificar se há atualizações" das Configurações (UsoClient
+    StartInteractiveScan). Assim a tela do Windows Update passa a mostrar o mesmo que o SnakeOptimizer achou, em vez de
+    uma verificação antiga. Não espera nem falha: é só um pedido.
+    #>
+    try { Start-Process -FilePath (Join-Path $env:SystemRoot "System32\UsoClient.exe") -ArgumentList "StartInteractiveScan" -WindowStyle Hidden -ErrorAction Stop }
+    catch { Write-Verbose "UsoClient: $($_.Exception.Message)" }
 }
 
 
@@ -1457,6 +1492,9 @@ function Install-SnakeOptimizerWindowsUpdates {
         # O andamento vai para a barra de progresso: uma linha "procurando..." ficaria no resumo depois do fim.
         Write-Progress -Activity "Procurando atualizações" -Status "o Windows Update pode levar alguns minutos para responder"
 
+        # A mesma busca vai para a tela do Windows Update, que passa a refletir o que for achado aqui.
+        Request-SnakeOptimizerWindowsUpdateScan
+
         try {
             $search = Find-SnakeOptimizerWindowsUpdates
         }
@@ -1536,7 +1574,7 @@ function Install-SnakeOptimizerWindowsUpdates {
         $needsDownload = @($chosen | Where-Object { -not $_.Downloaded }).Count -gt 0
 
         Write-SnakeOptimizerKeyValue -Label "Atualizações escolhidas" -Value $chosen.Count
-        Write-SnakeOptimizerKeyValue -Label "A baixar" -Value $(if (-not $needsDownload) { "nada (já estão baixadas)" } elseif ($download -gt 0) { "até $(Format-SnakeOptimizerBytes -Bytes $download)" } else { "tamanho não informado" })
+        Write-SnakeOptimizerKeyValue -Label "A baixar" -Value (Get-SnakeOptimizerUpdateDownloadText -Updates $chosen)
         Write-SnakeOptimizerFirmwareWarning -Updates $chosen
         if ($needsDownload) { Write-SnakeOptimizerMeteredWarning -Bytes $download }
         # Parado no meio, o Windows pode continuar instalando por conta própria.
@@ -1612,6 +1650,9 @@ function Install-SnakeOptimizerPendingUpdates {
 
     try {
         Write-Progress -Activity "Procurando atualizações" -Status "o Windows Update pode levar alguns minutos para responder"
+
+        # A mesma busca vai para a tela do Windows Update, que passa a refletir o que for achado aqui.
+        Request-SnakeOptimizerWindowsUpdateScan
 
         try {
             # Sem ninguém esperando (a parte automática do Otimizar), a busca tem mais tempo: a primeira num PC que passou
@@ -2173,8 +2214,7 @@ function Repair-SnakeOptimizerWindowsUpdate {
         }
         else {
             # Pede ao Windows uma busca nova, para as Configurações saírem da verificação antiga.
-            try { Start-Process -FilePath (Join-Path $env:SystemRoot "System32\UsoClient.exe") -ArgumentList "StartInteractiveScan" -WindowStyle Hidden -ErrorAction Stop }
-            catch { Write-Verbose "UsoClient: $($_.Exception.Message)" }
+            Request-SnakeOptimizerWindowsUpdateScan
 
             Write-SnakeOptimizerStatus -Type Info -Message "Uma busca nova foi pedida ao Windows. Para instalar, use Atualizações > Instalar atualizações do Windows; a primeira busca demora mais."
             Write-SnakeOptimizerStatus -Type Info -Message "Se a versão nova (ex.: 26H2) continuar sem aparecer, a Microsoft libera aos poucos e segura em PCs com incompatibilidade conhecida; o Assistente de Instalação do Windows 11 (site da Microsoft) instala na hora."
