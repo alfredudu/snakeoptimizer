@@ -1228,6 +1228,7 @@ $script:SnakeOptimizerUnattendedTasks = [ordered]@{
     "hora"              = @{ Label = "Acertar data e hora"; Command = "Invoke-SnakeOptimizerTimeSync"; Arguments = @{} }
     "dns"               = @{ Label = "Limpar cache de DNS e ARP (não derruba a conexão)"; Command = "Invoke-SnakeOptimizerDnsFlush"; Arguments = @{} }
     "rede"              = @{ Label = "Reparo completo de rede (derruba a conexão por instantes; pede reiniciar)"; Command = "Invoke-SnakeOptimizerNetworkRepair"; Arguments = @{ Embedded = $true; Force = $true } }
+    "discos"            = @{ Label = "Inventário de discos: % usado de cada unidade, modelo, serial, saúde e SMART (salva .txt em %ProgramData%\SnakeOptimizer\reports)"; Command = "Invoke-SnakeOptimizerUnattendedDiskInventory"; Arguments = @{} }
     "verificar"         = @{ Label = "Verificar o PC e salvar o relatório (em %ProgramData%\SnakeOptimizer\reports)"; Command = "Invoke-SnakeOptimizerUnattendedReport"; Arguments = @{} }
 }
 
@@ -1240,7 +1241,7 @@ $script:SnakeOptimizerAutoHistoryMax = 60
 # semanal, com ponto de restauração antes e os reparos do Windows.
 $script:SnakeOptimizerAutoPlans = [ordered]@{
     leve     = @{ Name = "Manutencao-Diaria"; Label = "leve"; Tasks = "limpeza-rapida,dns,atualizacoes,verificar" }
-    completa = @{ Name = "Manutencao-Semanal"; Label = "completa"; Tasks = "ponto-restauracao,limpeza-rapida,winsxs,dism-sfc,atualizacoes,hora,dns,verificar" }
+    completa = @{ Name = "Manutencao-Semanal"; Label = "completa"; Tasks = "ponto-restauracao,limpeza-rapida,winsxs,dism-sfc,atualizacoes,hora,dns,discos,verificar" }
 }
 $script:SnakeOptimizerAutoTaskPath = "\SnakeOptimizer\"
 
@@ -1255,6 +1256,331 @@ function Invoke-SnakeOptimizerUnattendedReport {
     }
     catch {
         Write-SnakeOptimizerStatus -Type Error -Message "Não foi possível salvar o relatório: $($_.Exception.Message)"
+        return (New-SnakeOptimizerResult -Kind Failed -Detail $_.Exception.Message -Title $title)
+    }
+}
+
+
+# ---------------------------------------------------------------------------
+# Inventário completo de discos (volumes com % de uso, discos físicos, SMART e TRIM)
+# ---------------------------------------------------------------------------
+
+function Format-SnakeOptimizerUsageBar {
+    # "[██████████░░░░░░░░░░]" com o uso em 20 casas.
+    param ([double]$Percent, [int]$Width = 20)
+
+    $filled = [int][Math]::Round([Math]::Max(0, [Math]::Min(100, $Percent)) / 100 * $Width)
+    return "[" + ([string][char]0x2588 * $filled) + ([string][char]0x2591 * ($Width - $filled)) + "]"
+}
+
+
+function Get-SnakeOptimizerDiskInventory {
+    <#
+    Tudo dos discos numa leitura só: o computador, o TRIM, cada volume com letra (tamanho, livre, % usado, nível) e cada
+    disco físico (modelo, serial, firmware, tipo, barramento, estado, partida/sistema, formato provável, contadores SMART
+    e os alertas da Saúde dos discos). Os contadores fora do possível (adaptadores USB) ficam de fora, como na Saúde.
+    #>
+    $cim = { param ($class) try { Get-CimInstance -ClassName $class -ErrorAction Stop | Select-Object -First 1 } catch { $null } }
+    $computer = & $cim "Win32_ComputerSystem"
+    $bios = & $cim "Win32_BIOS"
+
+    $trim = "não informado"
+    try {
+        $query = @(& fsutil.exe behavior query DisableDeleteNotify 2>$null) -join "`n"
+        if ($query -match 'NTFS DisableDeleteNotify\s*=\s*0') { $trim = "ligado" }
+        elseif ($query -match 'NTFS DisableDeleteNotify\s*=\s*1') { $trim = "DESLIGADO" }
+    }
+    catch { }
+
+    # Partições: a letra de cada volume e o disco onde ela fica.
+    $diskByLetter = @{}
+    try {
+        foreach ($p in @(Get-Partition -ErrorAction Stop)) {
+            $l = [string]$p.DriveLetter
+            if ($l -match '^[A-Za-z]$') { $diskByLetter[$l.ToUpperInvariant()] = [string]$p.DiskNumber }
+        }
+    }
+    catch { }
+
+    $systemLetter = ([string]$env:SystemDrive).TrimEnd(':', '\').ToUpperInvariant()
+    $volumes = @()
+    try {
+        foreach ($v in @(Get-Volume -ErrorAction Stop | Where-Object { [string]$_.DriveLetter -match '^[A-Za-z]$' -and $_.Size -gt 0 } | Sort-Object DriveLetter)) {
+            $letter = ([string]$v.DriveLetter).ToUpperInvariant()
+            $size = [double]$v.Size
+            $free = [double]$v.SizeRemaining
+            $used = [Math]::Round((($size - $free) / $size) * 100, 1)
+            $volumes += [PSCustomObject]@{
+                Letter     = "$($letter):"
+                Label      = [string]$v.FileSystemLabel
+                FileSystem = [string]$v.FileSystem
+                Size       = $size
+                Free       = $free
+                Used       = $used
+                Disk       = $(if ($diskByLetter.ContainsKey($letter)) { $diskByLetter[$letter] } else { "" })
+                System     = ($letter -eq $systemLetter)
+                Level      = (Get-SnakeOptimizerDiskSpaceLevel -FreeBytes $free -TotalBytes $size -System ($letter -eq $systemLetter))
+            }
+        }
+    }
+    catch { }
+
+    $logical = @{}
+    try { foreach ($d in @(Get-Disk -ErrorAction Stop)) { $logical[[string]$d.Number] = $d } } catch { }
+
+    $disks = @()
+    $physical = @()
+    try { $physical = @(Get-PhysicalDisk -ErrorAction Stop) } catch { }
+    $physical = @($physical | Sort-Object @{ Expression = { $n = 0; if ([int]::TryParse([string]$_.DeviceId, [ref]$n)) { $n } else { [int]::MaxValue } } })
+
+    foreach ($pd in $physical) {
+        $number = [string]$pd.DeviceId
+        $type = Get-SnakeOptimizerDiskTypeText -Disk $pd
+        $bus = [string]$pd.BusType
+        $counter = $null
+        try { $counter = $pd | Get-StorageReliabilityCounter -ErrorAction Stop } catch { }
+        $field = { param ($name) if ($counter -and $counter.PSObject.Properties[$name]) { $counter.$name } else { $null } }
+
+        $t = & $field "Temperature"
+        $h = & $field "PowerOnHours"
+        $w = & $field "Wear"
+        $wear = $(if ($null -ne $w -and [double]$w -ge 0 -and [double]$w -le 100) { [int]$w } else { $null })
+        if ($type -notin @("SSD", "NVMe") -and $wear -eq 0) { $wear = $null }
+        $bytesRead = & $field "BytesRead"
+        $bytesWritten = & $field "BytesWritten"
+
+        $format = switch -Regex ($bus) {
+            '^NVMe$' { "M.2 ou placa PCIe (NVMe)"; break }
+            '^SATA$' { "SATA (2,5`", 3,5`" ou M.2 SATA)"; break }
+            '^USB$' { "externo (USB)"; break }
+            '^(RAID|SAS|SCSI)$' { "atrás de controladora $bus"; break }
+            default { "não informado" }
+        }
+
+        $disk = [PSCustomObject]@{
+            Number                 = $number
+            Name                   = ([string]$pd.FriendlyName).Trim()
+            Serial                 = ([string]$pd.SerialNumber).Trim().TrimEnd('.')
+            Manufacturer           = ([string]$pd.Manufacturer).Trim()
+            Firmware               = ([string]$pd.FirmwareVersion).Trim()
+            Size                   = $pd.Size
+            Type                   = $type
+            Bus                    = $bus
+            Format                 = $format
+            HealthStatus           = $pd.HealthStatus
+            OperationalStatus      = @(@($pd.OperationalStatus) | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_ })
+            Boot                   = $(if ($logical.ContainsKey($number)) { [bool]$logical[$number].IsBoot } else { $null })
+            SystemDisk             = $(if ($logical.ContainsKey($number)) { [bool]$logical[$number].IsSystem } else { $null })
+            Partitions             = $(if ($logical.ContainsKey($number)) { $logical[$number].NumberOfPartitions } else { $null })
+            Volumes                = @($volumes | Where-Object { $_.Disk -eq $number })
+            Temperature            = $(if ($null -ne $t -and [double]$t -ge 1 -and [double]$t -le 127) { [int]$t } else { $null })
+            PowerOnHours           = $(if ($null -ne $h -and [double]$h -gt 0 -and [double]$h -lt 150000) { [int64]$h } else { $null })
+            Wear                   = $wear
+            ReadErrorsTotal        = & $field "ReadErrorsTotal"
+            WriteErrorsTotal       = & $field "WriteErrorsTotal"
+            ReadErrorsUncorrected  = & $field "ReadErrorsUncorrected"
+            WriteErrorsUncorrected = & $field "WriteErrorsUncorrected"
+            PowerCycles            = & $field "PowerCycleCount"
+            StartStopCycles        = & $field "StartStopCycleCount"
+            BytesRead              = $(if ($bytesRead -and [double]$bytesRead -gt 0) { $bytesRead } else { $null })
+            BytesWritten           = $(if ($bytesWritten -and [double]$bytesWritten -gt 0) { $bytesWritten } else { $null })
+        }
+        $disk | Add-Member -NotePropertyName Notes -NotePropertyValue @(Get-SnakeOptimizerDiskHealthNotes -Disk $disk)
+        $disks += $disk
+    }
+
+    return [PSCustomObject]@{
+        Date         = Get-Date
+        ComputerName = $env:COMPUTERNAME
+        Manufacturer = $(if ($computer) { ([string]$computer.Manufacturer).Trim() } else { "" })
+        Model        = $(if ($computer) { ([string]$computer.Model).Trim() } else { "" })
+        BiosSerial   = $(if ($bios) { ([string]$bios.SerialNumber).Trim() } else { "" })
+        Trim         = $trim
+        Volumes      = @($volumes)
+        Disks        = @($disks)
+        TotalSize    = [double](@($disks | ForEach-Object { [double]$_.Size }) | Measure-Object -Sum).Sum
+    }
+}
+
+
+function Get-SnakeOptimizerDiskVolumeText {
+    # "56% usado · 410 GB livres de 930 GB · FURY · NTFS".
+    param ([Parameter(Mandatory)]$Volume)
+
+    $parts = @("$([Math]::Round($Volume.Used))% usado","$(Format-SnakeOptimizerBytes -Bytes $Volume.Free) livres de $(Format-SnakeOptimizerBytes -Bytes $Volume.Size)")
+    if ($Volume.Label) { $parts += $Volume.Label }
+    if ($Volume.FileSystem) { $parts += $Volume.FileSystem }
+    return ($parts -join " · ")
+}
+
+
+function Get-SnakeOptimizerDiskInventoryLines {
+    # O inventário em texto (para o arquivo .txt e para o RMM).
+    param ([Parameter(Mandatory)]$Inventory)
+
+    $na = { param ($v) if ($null -eq $v -or [string]$v -eq "") { "não informado" } else { [string]$v } }
+    $yesNo = { param ($v) if ($null -eq $v) { "não informado" } elseif ($v) { "sim" } else { "não" } }
+    $line = "=" * 64
+    $out = New-Object System.Collections.Generic.List[string]
+    $kv = { param ($label, $value) $out.Add(("{0,-24}: {1}" -f $label, $value)) }
+
+    $out.Add($line); $out.Add("SNAKE TECH - INVENTÁRIO DE DISCOS (SnakeOptimizer)"); $out.Add($line)
+    & $kv "Computador" $Inventory.ComputerName
+    & $kv "Fabricante / modelo" "$($Inventory.Manufacturer) $($Inventory.Model)".Trim()
+    & $kv "Serial da BIOS" (& $na $Inventory.BiosSerial)
+    & $kv "Data" ($Inventory.Date.ToString("dd/MM/yyyy HH:mm:ss"))
+    & $kv "TRIM (NTFS)" $Inventory.Trim
+    & $kv "Discos físicos" @($Inventory.Disks).Count
+    & $kv "Capacidade total" (Format-SnakeOptimizerBytes -Bytes $Inventory.TotalSize)
+    foreach ($kind in "NVMe", "SSD", "HDD", "USB") {
+        $count = @($Inventory.Disks | Where-Object { $_.Type -eq $kind -or ($kind -eq "USB" -and $_.Bus -eq "USB" -and $_.Type -ne "USB") }).Count
+        if ($count -gt 0) { & $kv "  $kind" $count }
+    }
+
+    $out.Add(""); $out.Add("UNIDADES"); $out.Add("-" * 64)
+    foreach ($v in $Inventory.Volumes) {
+        $out.Add(("{0,-3} {1} {2}" -f $v.Letter, (Format-SnakeOptimizerUsageBar -Percent $v.Used), (Get-SnakeOptimizerDiskVolumeText -Volume $v)))
+    }
+
+    foreach ($d in $Inventory.Disks) {
+        $out.Add(""); $out.Add($line); $out.Add("DISCO $($d.Number) - $($d.Name)"); $out.Add($line)
+        & $kv "Tipo" $d.Type
+        & $kv "Interface / formato" "$($d.Bus) · $($d.Format)"
+        & $kv "Capacidade" (Format-SnakeOptimizerBytes -Bytes $d.Size)
+        & $kv "Fabricante" (& $na $d.Manufacturer)
+        & $kv "Serial" (& $na $d.Serial)
+        & $kv "Firmware" (& $na $d.Firmware)
+        & $kv "Estado" "$(Get-SnakeOptimizerDiskHealthStatusText -Status $d.HealthStatus) ($(($d.OperationalStatus) -join ', '))"
+        & $kv "Disco de partida" (& $yesNo $d.Boot)
+        & $kv "Disco do sistema" (& $yesNo $d.SystemDisk)
+        & $kv "Partições" (& $na $d.Partitions)
+        & $kv "Unidades" $(if ($d.Volumes.Count) { ($d.Volumes | ForEach-Object { "$($_.Letter) $([Math]::Round($_.Used))%" }) -join ", " } else { "nenhuma com letra" })
+        $smart = @($d.Temperature, $d.Wear, $d.PowerOnHours, $d.PowerCycles, $d.ReadErrorsTotal, $d.WriteErrorsTotal, $d.ReadErrorsUncorrected, $d.WriteErrorsUncorrected) | Where-Object { $null -ne $_ }
+        if (@($smart).Count -eq 0) {
+            & $kv "SMART" "não lido (exige Administrador; discos USB e RAID nem sempre informam)"
+        }
+        else {
+            & $kv "Temperatura" $(if ($null -ne $d.Temperature) { "$($d.Temperature) °C" } else { "não informada" })
+            & $kv "Desgaste" $(if ($d.Type -eq "HDD") { "não se aplica (HDD)" } elseif ($null -ne $d.Wear) { "$($d.Wear)% da vida útil" } else { "não informado" })
+            & $kv "Horas ligado" (& $na $d.PowerOnHours)
+            & $kv "Ligações (power cycles)" (& $na $d.PowerCycles)
+            & $kv "Erros de leitura" "$(& $na $d.ReadErrorsTotal) (não corrigidos: $(& $na $d.ReadErrorsUncorrected))"
+            & $kv "Erros de escrita" "$(& $na $d.WriteErrorsTotal) (não corrigidos: $(& $na $d.WriteErrorsUncorrected))"
+        }
+        if ($d.BytesRead) { & $kv "Total lido" (Format-SnakeOptimizerBytes -Bytes $d.BytesRead) }
+        if ($d.BytesWritten) { & $kv "Total gravado" (Format-SnakeOptimizerBytes -Bytes $d.BytesWritten) }
+        foreach ($n in $d.Notes) { $out.Add("ALERTA: $n") }
+    }
+
+    $out.Add(""); $out.Add($line)
+    return $out.ToArray()
+}
+
+
+function Save-SnakeOptimizerDiskInventory {
+    # Grava o .txt: em %ProgramData%\SnakeOptimizer\reports com Administrador (onde o RMM e a manutenção automática
+    # guardam), senão na pasta de relatórios do usuário. Devolve o caminho.
+    param ([Parameter(Mandatory)]$Inventory)
+
+    $folder = $(if (Test-SnakeOptimizerAdministrator) { Join-Path $script:SnakeOptimizerAutoRoot "reports" } else { Join-Path (Get-SnakeOptimizerDataPath) "reports" })
+    if (-not (Test-Path -LiteralPath $folder)) { [void](New-Item -ItemType Directory -Path $folder -Force) }
+    $path = Join-Path $folder "DISCOS-$($Inventory.ComputerName)-$($Inventory.Date.ToString('yyyyMMdd-HHmm')).txt"
+    Set-Content -LiteralPath $path -Value (Get-SnakeOptimizerDiskInventoryLines -Inventory $Inventory) -Encoding UTF8
+
+    # Só os 10 mais novos.
+    Get-ChildItem -LiteralPath $folder -Filter "DISCOS-*.txt" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending |
+        Select-Object -Skip 10 | Remove-Item -Force -ErrorAction SilentlyContinue
+    return $path
+}
+
+
+function Get-SnakeOptimizerDiskInventoryResult {
+    # A faixa de resultado: discos com alerta e unidades com pouco espaço.
+    param ([Parameter(Mandatory)]$Inventory, [string]$Title, [hashtable]$Data = @{})
+
+    $problems = @()
+    foreach ($d in @($Inventory.Disks | Where-Object { $_.Notes.Count -gt 0 })) { $problems += "disco $($d.Number) ($($d.Name)) com alerta" }
+    foreach ($v in @($Inventory.Volumes | Where-Object { $_.Level -in "Low", "Critical" })) { $problems += "$($v.Letter) com $([Math]::Round($v.Used))% usado" }
+    if ($Inventory.Trim -eq "DESLIGADO" -and @($Inventory.Disks | Where-Object { $_.Type -in "SSD", "NVMe" }).Count -gt 0) { $problems += "TRIM desligado com SSD" }
+
+    if ($problems.Count -gt 0) { return (New-SnakeOptimizerResult -Kind Warning -Detail ($problems -join "; ") -Title $Title -Data $Data) }
+    return (New-SnakeOptimizerResult -Kind Ok -Detail "$(@($Inventory.Disks).Count) discos e $(@($Inventory.Volumes).Count) unidades sem alerta" -Title $Title -Data $Data)
+}
+
+
+function Show-SnakeOptimizerDiskInventory {
+    $title = "Inventário completo de discos"
+    Enter-SnakeOptimizerAction -Title $title
+
+    Write-SnakeOptimizerStatus -Type Running -Notice -Message "Lendo discos, unidades e contadores SMART..."
+    $inv = Get-SnakeOptimizerDiskInventory
+
+    if (@($inv.Disks).Count -eq 0 -and @($inv.Volumes).Count -eq 0) {
+        Write-SnakeOptimizerStatus -Type Warning -Message "O Windows não respondeu com os discos. Tente de novo; se continuar, reinicie o PC."
+        Exit-SnakeOptimizerAction -Result (New-SnakeOptimizerResult -Kind Failed -Detail "discos não lidos" -Title $title)
+        return
+    }
+
+    Write-SnakeOptimizerSection -Title "Unidades (espaço usado)"
+    foreach ($v in $inv.Volumes) {
+        $level = switch ($v.Level) { "Critical" { "Bad" } "Low" { "Warn" } default { "Normal" } }
+        Write-SnakeOptimizerKeyValue -Label "$($v.Letter) $(Format-SnakeOptimizerUsageBar -Percent $v.Used)" -Value (Get-SnakeOptimizerDiskVolumeText -Volume $v) -LabelWidth 26 -Level $level
+    }
+
+    Write-SnakeOptimizerSection -Title "Resumo"
+    Write-SnakeOptimizerKeyValue -Label "Discos físicos" -Value "$(@($inv.Disks).Count) · $(Format-SnakeOptimizerBytes -Bytes $inv.TotalSize) no total"
+    Write-SnakeOptimizerKeyValue -Label "TRIM (SSD)" -Value $inv.Trim -Level $(if ($inv.Trim -eq "DESLIGADO") { "Warn" } else { "Normal" })
+    Write-SnakeOptimizerKeyValue -Label "Computador" -Value "$($inv.Manufacturer) $($inv.Model) · serial $($inv.BiosSerial)"
+
+    foreach ($d in $inv.Disks) {
+        $status = Get-SnakeOptimizerDiskHealthStatusText -Status $d.HealthStatus
+        Write-SnakeOptimizerSection -Title "Disco $($d.Number): $($d.Name) ($($d.Type), $(Format-SnakeOptimizerBytes -Bytes $d.Size))"
+        Write-SnakeOptimizerKeyValue -Label "Estado" -Value $status -Level $(switch ($status) { "Saudável" { "Ok" } "Atenção" { "Warn" } "Com defeito" { "Bad" } default { "Normal" } })
+        Write-SnakeOptimizerKeyValue -Label "Unidades" -Value $(if ($d.Volumes.Count) { ($d.Volumes | ForEach-Object { "$($_.Letter) $([Math]::Round($_.Used))% usado" }) -join ", " } else { "nenhuma com letra" })
+        Write-SnakeOptimizerKeyValue -Label "Interface" -Value "$($d.Bus) · $($d.Format)"
+        Write-SnakeOptimizerKeyValue -Label "Serial / firmware" -Value "$(if ($d.Serial) { $d.Serial } else { '-' }) / $(if ($d.Firmware) { $d.Firmware } else { '-' })"
+        if ($d.Boot -or $d.SystemDisk) { Write-SnakeOptimizerKeyValue -Label "Papel" -Value "disco do Windows (partida/sistema)" }
+        Write-SnakeOptimizerKeyValue -Label "Temperatura" -Value $(if ($null -ne $d.Temperature) { "$($d.Temperature) °C" } else { $null })
+        Write-SnakeOptimizerKeyValue -Label "Desgaste" -Value $(if ($d.Type -eq "HDD") { $null } elseif ($null -ne $d.Wear) { "$($d.Wear)% da vida útil" } else { $null })
+        Write-SnakeOptimizerKeyValue -Label "Horas ligado" -Value $(if ($null -ne $d.PowerOnHours) { "$(Format-SnakeOptimizerNumber -Value ([double]$d.PowerOnHours)) h" } else { $null })
+        if ($null -ne $d.ReadErrorsTotal -or $null -ne $d.WriteErrorsTotal) {
+            Write-SnakeOptimizerKeyValue -Label "Erros" -Value "leitura $([string]$d.ReadErrorsTotal), escrita $([string]$d.WriteErrorsTotal)"
+        }
+        if ($d.BytesWritten) { Write-SnakeOptimizerKeyValue -Label "Total gravado" -Value (Format-SnakeOptimizerBytes -Bytes $d.BytesWritten) }
+        foreach ($n in $d.Notes) { Write-SnakeOptimizerStatus -Type Warning -Message "$n." }
+    }
+
+    $data = @{}
+    try {
+        $path = Save-SnakeOptimizerDiskInventory -Inventory $inv
+        Write-Host ""
+        Write-SnakeOptimizerKeyValue -Label "Inventário salvo" -Value $path
+        $data.Report = $path
+    }
+    catch {
+        Write-SnakeOptimizerStatus -Type Warning -Message "Não foi possível salvar o arquivo: $($_.Exception.Message)"
+    }
+
+    if (-not (Test-SnakeOptimizerAdministrator)) {
+        Write-SnakeOptimizerStatus -Type Info -Notice -Message "Sem Administrador, temperatura, desgaste e erros podem não aparecer."
+    }
+
+    Exit-SnakeOptimizerAction -Result (Get-SnakeOptimizerDiskInventoryResult -Inventory $inv -Title $title -Data $data)
+}
+
+
+function Invoke-SnakeOptimizerUnattendedDiskInventory {
+    # Tarefa "discos" do modo silencioso: o inventário no console (o RMM guarda a saída) e no .txt.
+    $title = "Inventário de discos"
+    try {
+        $inv = Get-SnakeOptimizerDiskInventory
+        Get-SnakeOptimizerDiskInventoryLines -Inventory $inv | ForEach-Object { Write-Host $_ }
+        $path = Save-SnakeOptimizerDiskInventory -Inventory $inv
+        Write-SnakeOptimizerStatus -Type Success -Message "Inventário de discos salvo em: $path"
+        return (Get-SnakeOptimizerDiskInventoryResult -Inventory $inv -Title $title -Data @{ Report = $path })
+    }
+    catch {
+        Write-SnakeOptimizerStatus -Type Error -Message "Não foi possível fazer o inventário de discos: $($_.Exception.Message)"
         return (New-SnakeOptimizerResult -Kind Failed -Detail $_.Exception.Message -Title $title)
     }
 }

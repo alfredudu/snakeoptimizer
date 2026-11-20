@@ -128,6 +128,9 @@ function Get-SnakeOptimizerNavigation {
         (New-SnakeOptimizerNavItem -Id "diagnostics.disks" -Label "Discos e espaço livre" -Group "Hardware" `
             -Keywords "armazenamento ssd hdd hd cheio capacidade unidade" `
             -Description "SSD ou HDD, espaço livre e uso de cada unidade" -Command "Show-SnakeOptimizerDisks"),
+        (New-SnakeOptimizerNavItem -Id "diagnostics.disk-inventory" -Label "Inventário completo de discos" -Group "Hardware" -Admin -Accent `
+            -Keywords "inventário porcentagem percentual % usado cheio serial firmware smart trim nvme ssd hd hdd sata usb externo temperatura desgaste" `
+            -Description "Cada unidade com a % usada, e cada disco com modelo, serial, interface, saúde e SMART; salva em .txt" -Command "Show-SnakeOptimizerDiskInventory"),
         (New-SnakeOptimizerNavItem -Id "diagnostics.disk-health" -Label "Saúde dos discos" -Group "Hardware" -Admin `
             -Keywords "smart temperatura desgaste ssd hdd hd falha" `
             -Description "Estado, temperatura, desgaste e erros de cada disco" -Command "Show-SnakeOptimizerDiskHealth"),

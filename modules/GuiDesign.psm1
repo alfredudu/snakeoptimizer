@@ -135,7 +135,7 @@ $script:SnakeOptimizerIconNames = @{
     "maintenance.auto" = "sync"; "maintenance.schedule" = "calendar"; "maintenance.history" = "list"
     "maintenance.task-scheduler" = "clock"; "maintenance.checkup" = "check-circle"; "maintenance.changes" = "undo"
 
-    "diagnostics.about" = "monitor"; "diagnostics.disks" = "disk"; "diagnostics.disk-health" = "pulse"; "diagnostics.battery" = "battery"
+    "diagnostics.about" = "monitor"; "diagnostics.disks" = "disk"; "diagnostics.disk-health" = "pulse"; "diagnostics.disk-inventory" = "disk"; "diagnostics.battery" = "battery"
     "diagnostics.events" = "warning"; "diagnostics.devices" = "cpu"; "diagnostics.startup" = "clock"
     "diagnostics.pending-reboot" = "power"; "diagnostics.report" = "document"; "diagnostics.device-manager" = "sliders"
     "diagnostics.reliability" = "history"; "diagnostics.windows-support" = "calendar"

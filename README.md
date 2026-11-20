@@ -100,6 +100,7 @@ $env:SO_MODE='Run'; $env:SO_TASK='limpeza-rapida,dns'; irm links.snaketech.com.b
 | `atualizacoes` | Instala as atualizações do Windows (sem prévias, versão nova nem drivers opcionais; não reinicia) |
 | `dns` | Limpa o cache DNS e ARP e registra o DNS |
 | `rede` | Reparo completo de rede (IP, DNS, Winsock, TCP/IP) |
+| `discos` | Inventário de discos: % usado de cada unidade, modelo, serial, firmware, interface, saúde, SMART e TRIM (`.txt` em `%ProgramData%\SnakeOptimizer\reports` e na saída do RMM) |
 | `verificar` | Salva o relatório completo em `%ProgramData%\SnakeOptimizer\reports` |
 
 Várias tarefas separadas por vírgula rodam sempre na ordem da tabela. Códigos de saída: `0` tudo ok, `1` alguma com aviso, `2` alguma falhou, `3` sem privilégios de administrador, `4` tarefa desconhecida. Sem `SO_TASK`, lista as tarefas.

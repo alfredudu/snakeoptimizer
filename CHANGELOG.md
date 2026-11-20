@@ -1,5 +1,10 @@
 # Histórico de mudanças do SnakeOptimizer
 
+## 1.6 — 20/11/2026
+
+- **Inventário completo de discos** (Diagnóstico > Hardware): cada unidade com barra e % usado, livre e total; cada disco físico com modelo, serial, firmware, tipo (NVMe/SSD/HDD/USB), interface e formato provável, estado, disco de partida/sistema, partições e os contadores SMART (temperatura, desgaste, horas ligado, ligações, erros, total lido e gravado); TRIM. Salva em `.txt` (os 10 mais novos).
+- Modo silencioso: tarefa nova `discos`, que também entra na manutenção completa (semanal).
+
 ## 1.5.1 — 20/11/2026
 
 - A instalação no PC liga o **ícone na bandeja** (perto do relógio) para todos os usuários e já o abre na hora. Quem desligar o monitor na própria conta (Sobre > Monitor na bandeja) fica de fora, mesmo com a entrada do PC.
