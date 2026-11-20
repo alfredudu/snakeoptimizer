@@ -678,6 +678,7 @@ function Get-SnakeOptimizerNetworkRepairCommands {
     }
 
     $commands += [PSCustomObject]@{ Title = "Limpar cache DNS"; FilePath = "ipconfig.exe"; Arguments = @("/flushdns"); NeedsRestart = $false }
+    $commands += [PSCustomObject]@{ Title = "Limpar cache ARP"; FilePath = "netsh.exe"; Arguments = @("interface", "ip", "delete", "arpcache"); NeedsRestart = $false }
     $commands += [PSCustomObject]@{ Title = "Redefinir Winsock"; FilePath = "netsh.exe"; Arguments = @("winsock", "reset"); NeedsRestart = $true }
 
     if (-not $HasStaticIp -and -not $HasManualDns) {

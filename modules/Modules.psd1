@@ -38,6 +38,7 @@
         'Drivers',
         'Checkup',
         'Agent',
+        'SnakeTools',
         'Navigation',
         'Home'
     )

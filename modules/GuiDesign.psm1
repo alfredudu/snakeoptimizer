@@ -152,6 +152,7 @@ $script:SnakeOptimizerIconNames = @{
 
     "repair.dism-sfc" = "wrench"; "repair.dism" = "package"; "repair.sfc" = "document"; "repair.chkdsk" = "disk"
     "repair.device-scan" = "search"; "repair.optimize" = "speed"; "repair.system-restore" = "history"; "repair.recovery" = "restore"
+    "repair.office" = "document"; "repair.print-spooler" = "list"; "repair.store" = "apps"; "repair.time-sync" = "clock"
 
     "updates.install" = "download"; "updates.winget" = "package"; "updates.windows" = "sync"; "updates.optional" = "list"
     "updates.store" = "apps"; "updates.drivers" = "cpu"; "updates.vendor-tools" = "search"; "updates.repair" = "wrench"
@@ -162,7 +163,7 @@ $script:SnakeOptimizerIconNames = @{
     "software.backup" = "upload"; "software.restore" = "download"
 
     "network.info" = "info"; "network.ping" = "pulse"; "network.speed" = "speed"; "network.wifi-report" = "document"
-    "network.repair" = "wrench"; "network.dns" = "globe"; "network.dns-undo" = "undo"
+    "network.repair" = "wrench"; "network.dns" = "globe"; "network.dns-undo" = "undo"; "network.proxy-reset" = "globe"
 
     "tweaks.recommended" = "sparkles"; "tweaks.profiles" = "list"; "tweaks.restore-point" = "restore"; "tweaks.export" = "upload"
     "tweaks.import" = "download"; "tweaks.revert-all" = "undo"; "tweaks.keyboard-language" = "keyboard"; "tweaks.notifications" = "bell"

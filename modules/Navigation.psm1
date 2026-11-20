@@ -251,6 +251,18 @@ function Get-SnakeOptimizerNavigation {
         (New-SnakeOptimizerNavItem -Id "repair.optimize" -Label "Otimizar a unidade do sistema" -Group "Disco e dispositivos" -Admin `
             -Keywords "trim ssd desfragmentar desfragmentação hdd defrag disco lento" `
             -Description "Deixa o disco do Windows mais rápido: o próprio Windows escolhe o certo para SSD ou HD" -Command "Start-SnakeOptimizerDriveOptimization"),
+        (New-SnakeOptimizerNavItem -Id "repair.office" -Label "Reparar o Microsoft Office" -Group "Programas e serviços" -Admin -Accent `
+            -Keywords "office word excel outlook powerpoint 365 travando não abre licença ativação produto não licenciado login conta cache suplemento clicktorun reparo online rápido" `
+            -Description "Limpa o cache, redefine login e ativação ou faz o reparo rápido ou online do Office" -Command "Invoke-SnakeOptimizerOfficeRepair"),
+        (New-SnakeOptimizerNavItem -Id "repair.print-spooler" -Label "Destravar a fila de impressão" -Group "Programas e serviços" -Admin `
+            -Keywords "impressora impressão fila travada presa spooler spool documento preso não imprime cancelar" `
+            -Description "Para o Spooler, apaga os documentos presos na fila e religa a impressão" -Command "Invoke-SnakeOptimizerPrintSpoolerReset"),
+        (New-SnakeOptimizerNavItem -Id "repair.store" -Label "Redefinir a Microsoft Store" -Group "Programas e serviços" `
+            -Keywords "store loja wsreset download parado não instala aplicativo erro cache" `
+            -Description "Limpa o cache da Store quando o download trava ou ela não abre; não remove aplicativos" -Command "Invoke-SnakeOptimizerStoreReset"),
+        (New-SnakeOptimizerNavItem -Id "repair.time-sync" -Label "Acertar data e hora" -Group "Programas e serviços" -Admin `
+            -Keywords "hora errada data errada relógio w32tm sincronizar horário certificado https ntp" `
+            -Description "Sincroniza o relógio com o servidor de horário; hora errada quebra login, HTTPS e VPN" -Command "Invoke-SnakeOptimizerTimeSync"),
         (New-SnakeOptimizerNavItem -Id "repair.system-restore" -Label "Restauração do Sistema" -Group "Ferramentas do Windows" `
             -Keywords "voltar rstrui desfazer" `
             -Description "Abre a janela do Windows que volta o PC a um ponto de restauração" -Shortcut "SystemRestore"),
@@ -341,6 +353,9 @@ function Get-SnakeOptimizerNavigation {
         (New-SnakeOptimizerNavItem -Id "network.repair" -Label "Reparar rede e DNS" -Group "Consertar e configurar" -Admin `
             -Keywords "internet não funciona conecta conectar sem conexão caiu queda wifi wi-fi fio winsock flushdns ipconfig reset renovar reiniciar redefinir dhcp netsh roteador" `
             -Description "Para quando a internet não funciona: refaz as configurações de rede; IP e DNS fixos são mantidos" -Command "Invoke-SnakeOptimizerNetworkRepair"),
+        (New-SnakeOptimizerNavItem -Id "network.proxy-reset" -Label "Remover proxy travado" -Group "Consertar e configurar" -Admin `
+            -Keywords "proxy navegador não abre sites internet só em alguns programas winhttp vírus sequestrado" `
+            -Description "Tira o proxy que um programa deixou configurado; não use em empresa que exige proxy" -Command "Invoke-SnakeOptimizerProxyReset"),
         (New-SnakeOptimizerNavItem -Id "network.dns" -Label "Trocar o servidor DNS" -Group "Consertar e configurar" -Admin `
             -Keywords "cloudflare google quad9 1.1.1.1 8.8.8.8 1.1.1.3 lento sites família filtro adulto controle parental bloquear" `
             -Description "Mede o tempo de resposta e troca para Cloudflare, Google, Quad9 ou o filtro para famílias" -Command "Set-SnakeOptimizerDnsProvider"),

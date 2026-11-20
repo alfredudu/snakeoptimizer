@@ -40,7 +40,12 @@ Ações mais usadas (lista completa com `-ListActions`):
 | `repair.dism-sfc` | Reparar o Windows (DISM + SFC) |
 | `updates.winget` | Atualizar programas (winget) |
 | `updates.repair` | Corrigir o Windows Update |
-| `network.repair` | Reparar rede e DNS |
+| `network.repair` | Reparar rede e DNS (IP, DNS, ARP, Winsock, TCP/IP) |
+| `network.proxy-reset` | Remover proxy travado |
+| `repair.office` | Reparar o Office: cache, login/ativação, reparo rápido ou online |
+| `repair.print-spooler` | Destravar a fila de impressão |
+| `repair.store` | Redefinir a Microsoft Store |
+| `repair.time-sync` | Acertar data e hora |
 | `tweaks.recommended` | Aplicar ajustes recomendados |
 | `software.backup` | Backup antes de formatar |
 
