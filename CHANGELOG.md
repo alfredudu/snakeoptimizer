@@ -1,5 +1,13 @@
 # Histórico de mudanças do SnakeOptimizer
 
+## 1.4 — 20/11/2026
+
+- **Manutenção automática** (Manutenção): tarefas do Agendador que rodam como SYSTEM, sem janela. Leve (limpeza rápida, DNS, atualizações do Windows e relatório) de segunda a sábado e completa (ponto de restauração, limpeza, WinSxS, DISM + SFC, atualizações, hora, DNS e relatório) no domingo, às 12h; ou só uma das duas. Nunca reinicia o PC. Baixa a versão mais nova a cada execução (sem internet, usa a cópia local). As últimas execuções, com o que pediu atenção e o que pede reinício, aparecem na tela.
+- Modo silencioso: tarefas novas `atualizacoes` (sem prévias, versão nova do Windows nem drivers opcionais) e `verificar` (relatório em `%ProgramData%\SnakeOptimizer\reports`). Cada execução fica no histórico (`%ProgramData%\SnakeOptimizer\historico-automatico.json`).
+- **`Abrir-SnakeOptimizer.cmd`**: atalho que pede o Administrador sozinho e abre sempre a versão mais nova.
+- Segurança: o launcher tranca `%ProgramData%\SnakeOptimizer` para só Administradores e SYSTEM alterarem (a manutenção automática roda o que está lá).
+- Correções: andamento detalhado das atualizações, espera quando o Windows já está instalando, janela antiga travada avisa e oferece fechar, reparo do Windows Update segue sem os Serviços de Criptografia.
+
 ## 1.3 — 20/11/2026
 
 - **Corrigir o Windows Update** agora também resolve o "fica baixando e nunca termina": cancela os downloads presos na fila do BITS, limpa o cache da Otimização de Entrega e, no fim, pede ao Windows uma busca nova.

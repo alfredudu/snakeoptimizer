@@ -132,7 +132,7 @@ $script:SnakeOptimizerIconNames = @{
     "search" = "search"
 
     "maintenance.recommended" = "gauge"; "maintenance.restore-point" = "flag"; "maintenance.restore" = "restore"
-    "maintenance.schedule" = "calendar"; "maintenance.history" = "list"
+    "maintenance.auto" = "sync"; "maintenance.schedule" = "calendar"; "maintenance.history" = "list"
     "maintenance.task-scheduler" = "clock"; "maintenance.checkup" = "check-circle"; "maintenance.changes" = "undo"
 
     "diagnostics.about" = "monitor"; "diagnostics.disks" = "disk"; "diagnostics.disk-health" = "pulse"; "diagnostics.battery" = "battery"

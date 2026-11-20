@@ -60,6 +60,14 @@ Ações mais usadas (lista completa com `-ListActions`):
 | Relatório HTML/TXT em `%ProgramData%\SnakeOptimizer\reports` | `$env:SO_MODE='Report'; irm <url>/launch.ps1 \| iex` |
 | Abrir a janela na tela do usuário logado | `irm <url>/launch.ps1 \| iex` (detecta SYSTEM e abre na sessão do usuário) |
 
+### Atalho (sem digitar comando)
+
+Baixe o [`Abrir-SnakeOptimizer.cmd`](Abrir-SnakeOptimizer.cmd) e deixe na Área de Trabalho ou no pendrive. Ele pede o Administrador sozinho e abre sempre a versão mais nova.
+
+### Manutenção automática
+
+Em **Manutenção > Manutenção automática**: leve de segunda a sábado e completa no domingo (ou só uma das duas), rodando como SYSTEM em segundo plano, sem reiniciar o PC. A tela mostra as últimas execuções e o último relatório.
+
 ### Modo silencioso (manutenção pelo RMM, sem janela e sem perguntas)
 
 ```powershell
@@ -74,8 +82,10 @@ $env:SO_MODE='Run'; $env:SO_TASK='limpeza-rapida,dns'; irm links.snaketech.com.b
 | `dism` / `sfc` / `dism-sfc` | Repara a imagem e os arquivos do Windows |
 | `fila-impressao` | Destrava a fila de impressão |
 | `hora` | Sincroniza data e hora |
+| `atualizacoes` | Instala as atualizações do Windows (sem prévias, versão nova nem drivers opcionais; não reinicia) |
 | `dns` | Limpa o cache DNS e ARP e registra o DNS |
 | `rede` | Reparo completo de rede (IP, DNS, Winsock, TCP/IP) |
+| `verificar` | Salva o relatório completo em `%ProgramData%\SnakeOptimizer\reports` |
 
 Várias tarefas separadas por vírgula rodam sempre na ordem da tabela. Códigos de saída: `0` tudo ok, `1` alguma com aviso, `2` alguma falhou, `3` sem privilégios de administrador, `4` tarefa desconhecida. Sem `SO_TASK`, lista as tarefas.
 

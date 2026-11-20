@@ -92,6 +92,9 @@ function Get-SnakeOptimizerNavigation {
         (New-SnakeOptimizerNavItem -Id "maintenance.checkup" -Label "Verificar o PC" -Group "Cuidar do PC" -Admin `
             -Keywords "escanear examinar scan check-up checkup diagnóstico um clique corrigir problemas saúde" `
             -Description "Confere o PC em uma passada e corrige, num clique, o que é seguro" -Command "Invoke-SnakeOptimizerCheckup"),
+        (New-SnakeOptimizerNavItem -Id "maintenance.auto" -Label "Manutenção automática" -Group "Cuidar do PC" -Admin -Accent `
+            -Keywords "automática diária semanal segundo plano agendar agendamento sozinho todo dia atualizar windows update relatório histórico" `
+            -Description "Limpeza, atualizações do Windows e relatório todo dia, e reparo completo toda semana, sozinho em segundo plano" -Command "Show-SnakeOptimizerAutoMaintenance"),
         (New-SnakeOptimizerNavItem -Id "maintenance.schedule" -Label "Manutenção agendada" -Group "Cuidar do PC" -Admin `
             -Keywords "automática mensal tarefa sozinha agendar" `
             -Description "Uma limpeza leve e um relatório todo mês, sem você abrir o SnakeOptimizer" -Command "Show-SnakeOptimizerScheduledMaintenance"),

@@ -1766,7 +1766,10 @@ function Install-SnakeOptimizerPendingUpdates {
     #>
     param (
         [switch]$Embedded,
-        [switch]$PassThru
+        [switch]$PassThru,
+
+        # Manutenção automática: só o que o próprio Windows instalaria sozinho (drivers opcionais ficam de fora).
+        [switch]$NoOptionalDrivers
     )
 
     $title = "Atualizar o Windows"
@@ -1800,7 +1803,12 @@ function Install-SnakeOptimizerPendingUpdates {
             $upgrades = @($updates | Where-Object { [bool](Get-SnakeOptimizerJsonValue -Object $_ -Name "Upgrade" -Default $false) })
             $firmware = @($updates | Where-Object { -not [bool](Get-SnakeOptimizerJsonValue -Object $_ -Name "Upgrade" -Default $false) -and [bool](Get-SnakeOptimizerJsonValue -Object $_ -Name "BrowseOnly" -Default $false) -and (Test-SnakeOptimizerFirmwareUpdate -Update $_) })
             $previews = @($updates | Where-Object { -not [bool](Get-SnakeOptimizerJsonValue -Object $_ -Name "Upgrade" -Default $false) -and [bool](Get-SnakeOptimizerJsonValue -Object $_ -Name "BrowseOnly" -Default $false) -and -not [bool](Get-SnakeOptimizerJsonValue -Object $_ -Name "Driver" -Default $false) })
-            $left = @(@($upgrades) + @($firmware) + @($previews) | ForEach-Object { [string]$_.Id })
+            $optionalDrivers = @()
+            if ($NoOptionalDrivers) {
+                $optionalDrivers = @($updates | Where-Object { [bool](Get-SnakeOptimizerJsonValue -Object $_ -Name "BrowseOnly" -Default $false) -and [bool](Get-SnakeOptimizerJsonValue -Object $_ -Name "Driver" -Default $false) -and @($firmware) -notcontains $_ })
+            }
+
+            $left = @(@($upgrades) + @($firmware) + @($previews) + @($optionalDrivers) | ForEach-Object { [string]$_.Id })
             $chosen = @($updates | Where-Object { $left -notcontains [string]$_.Id })
 
             # O que fica de fora, numa linha só (o porquê de cada um está no comentário da função).
@@ -1808,6 +1816,7 @@ function Install-SnakeOptimizerPendingUpdates {
                 @($upgrades | ForEach-Object { "$($_.Title) (versão nova do Windows)" })
                 @($firmware | ForEach-Object { "$($_.Title) (firmware opcional)" })
                 @($previews | ForEach-Object { "$(Get-SnakeOptimizerUpdateOptionLabel -Update $_) (prévia)" })
+                @($optionalDrivers | ForEach-Object { "$($_.Title) (driver opcional)" })
             )
 
             if ($leftNames.Count -gt 0) {

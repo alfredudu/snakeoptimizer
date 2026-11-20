@@ -1223,10 +1223,70 @@ $script:SnakeOptimizerUnattendedTasks = [ordered]@{
     "dism"              = @{ Label = "DISM: verificar e restaurar a imagem do Windows"; Command = "Invoke-SnakeOptimizerDism"; Arguments = @{ Embedded = $true } }
     "sfc"               = @{ Label = "SFC: verificar arquivos do sistema"; Command = "Invoke-SnakeOptimizerSfc"; Arguments = @{ Embedded = $true } }
     "dism-sfc"          = @{ Label = "Reparar o Windows (DISM + SFC)"; Command = "Invoke-SnakeOptimizerDismAndSfc"; Arguments = @{ Embedded = $true } }
+    "atualizacoes"      = @{ Label = "Instalar as atualizações do Windows (sem prévias, versão nova nem drivers opcionais; não reinicia)"; Command = "Install-SnakeOptimizerPendingUpdates"; Arguments = @{ Embedded = $true; NoOptionalDrivers = $true } }
     "fila-impressao"    = @{ Label = "Destravar a fila de impressão"; Command = "Invoke-SnakeOptimizerPrintSpoolerReset"; Arguments = @{ Unattended = $true } }
     "hora"              = @{ Label = "Acertar data e hora"; Command = "Invoke-SnakeOptimizerTimeSync"; Arguments = @{} }
     "dns"               = @{ Label = "Limpar cache de DNS e ARP (não derruba a conexão)"; Command = "Invoke-SnakeOptimizerDnsFlush"; Arguments = @{} }
     "rede"              = @{ Label = "Reparo completo de rede (derruba a conexão por instantes; pede reiniciar)"; Command = "Invoke-SnakeOptimizerNetworkRepair"; Arguments = @{ Embedded = $true; Force = $true } }
+    "verificar"         = @{ Label = "Verificar o PC e salvar o relatório (em %ProgramData%\SnakeOptimizer\reports)"; Command = "Invoke-SnakeOptimizerUnattendedReport"; Arguments = @{} }
+}
+
+# Onde o modo silencioso deixa o histórico e os relatórios: %ProgramData%, que a manutenção automática (SYSTEM), o RMM e
+# a janela (Administrador) enxergam igual. O launcher tranca a pasta para só Administradores alterarem.
+$script:SnakeOptimizerAutoRoot = Join-Path $env:ProgramData "SnakeOptimizer"
+$script:SnakeOptimizerAutoHistoryMax = 60
+
+# Os dois roteiros da manutenção automática. Leve: o de todo dia, rápido e sem nada que derrube a conexão. Completo: o
+# semanal, com ponto de restauração antes e os reparos do Windows.
+$script:SnakeOptimizerAutoPlans = [ordered]@{
+    leve     = @{ Name = "Manutencao-Diaria"; Label = "leve"; Tasks = "limpeza-rapida,dns,atualizacoes,verificar" }
+    completa = @{ Name = "Manutencao-Semanal"; Label = "completa"; Tasks = "ponto-restauracao,limpeza-rapida,winsxs,dism-sfc,atualizacoes,hora,dns,verificar" }
+}
+$script:SnakeOptimizerAutoTaskPath = "\SnakeOptimizer\"
+
+
+function Invoke-SnakeOptimizerUnattendedReport {
+    # Tarefa "verificar": o relatório completo (o mesmo de Relatórios), salvo onde a janela e o técnico encontram.
+    $title = "Verificar o PC"
+    try {
+        $report = Export-SnakeOptimizerReport -Directory (Join-Path $script:SnakeOptimizerAutoRoot "reports")
+        Write-SnakeOptimizerStatus -Type Success -Message "Relatório salvo em: $($report.Html)"
+        return (New-SnakeOptimizerResult -Kind Ok -Detail "relatório salvo" -Title $title -Data @{ Report = [string]$report.Html })
+    }
+    catch {
+        Write-SnakeOptimizerStatus -Type Error -Message "Não foi possível salvar o relatório: $($_.Exception.Message)"
+        return (New-SnakeOptimizerResult -Kind Failed -Detail $_.Exception.Message -Title $title)
+    }
+}
+
+
+function Get-SnakeOptimizerAutoHistoryPath {
+    return (Join-Path $script:SnakeOptimizerAutoRoot "historico-automatico.json")
+}
+
+
+function Get-SnakeOptimizerAutoHistory {
+    # As execuções do modo silencioso (manutenção automática ou RMM), da mais nova para a mais antiga.
+    $path = Get-SnakeOptimizerAutoHistoryPath
+    if (-not (Test-Path -LiteralPath $path)) { return @() }
+
+    try { return @(Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json) }
+    catch { return @() }
+}
+
+
+function Add-SnakeOptimizerAutoHistory {
+    param ([Parameter(Mandatory)]$Entry)
+
+    try {
+        if (-not (Test-Path -LiteralPath $script:SnakeOptimizerAutoRoot)) { New-Item -ItemType Directory -Path $script:SnakeOptimizerAutoRoot -Force | Out-Null }
+        $all = @(@($Entry) + @(Get-SnakeOptimizerAutoHistory) | Select-Object -First $script:SnakeOptimizerAutoHistoryMax)
+        $json = ConvertTo-Json -InputObject $all -Depth 5
+        [IO.File]::WriteAllText((Get-SnakeOptimizerAutoHistoryPath), $json, (New-Object Text.UTF8Encoding($false)))
+    }
+    catch {
+        Write-Verbose "Histórico: $($_.Exception.Message)"
+    }
 }
 
 
@@ -1257,6 +1317,9 @@ function Invoke-SnakeOptimizerUnattendedRun {
     $ordered = @($script:SnakeOptimizerUnattendedTasks.Keys | Where-Object { $requested -contains $_ })
     $summary = @()
     $worst = 0
+    $runStarted = Get-Date
+    $reportPath = ""
+    $reboot = $false
 
     foreach ($key in $ordered) {
         $definition = $script:SnakeOptimizerUnattendedTasks[$key]
@@ -1273,11 +1336,15 @@ function Invoke-SnakeOptimizerUnattendedRun {
         $code = switch ($result.Kind) { "Warning" { 1 } "Failed" { 2 } default { 0 } }
         if ($code -gt $worst) { $worst = $code }
 
+        $needsReboot = [bool]($result.Data -and $result.Data.RebootRequired)
+        if ($needsReboot) { $reboot = $true }
+        if ($result.Data -and $result.Data.Report) { $reportPath = [string]$result.Data.Report }
+
         $summary += [PSCustomObject]@{
             Tarefa    = $key
             Resultado = $result.Status
             Tempo     = "{0:mm\:ss}" -f ((Get-Date) - $started)
-            Reiniciar = $(if ($result.Data -and $result.Data.RebootRequired) { "sim" } else { "" })
+            Reiniciar = $(if ($needsReboot) { "sim" } else { "" })
         }
     }
 
@@ -1286,7 +1353,238 @@ function Invoke-SnakeOptimizerUnattendedRun {
     $summary | Format-Table -AutoSize | Out-String -Width 200 | Write-Host
     Write-Host "Código de saída: $worst (0 ok, 1 alertas, 2 falha)"
 
+    # O histórico que a tela "Manutenção automática" mostra (só com Administrador/SYSTEM, que podem gravar em ProgramData).
+    if (Test-SnakeOptimizerAdministrator) {
+        Add-SnakeOptimizerAutoHistory -Entry ([ordered]@{
+                At      = $runStarted.ToString("o", [Globalization.CultureInfo]::InvariantCulture)
+                Minutes = [math]::Round(((Get-Date) - $runStarted).TotalMinutes, 1)
+                Tasks   = ($ordered -join ",")
+                Code    = $worst
+                Reboot  = $reboot
+                Report  = $reportPath
+                Items   = @($summary | ForEach-Object { [ordered]@{ Tarefa = $_.Tarefa; Resultado = [string]$_.Resultado } })
+            })
+    }
+
     return $worst
+}
+
+
+# ---------------------------------------------------------------------------
+# Manutenção automática (tarefas do Agendador como SYSTEM)
+# ---------------------------------------------------------------------------
+
+function Get-SnakeOptimizerAutoTaskCommand {
+    <#
+    O que a tarefa roda: o launcher mais novo do GitHub no modo silencioso (cada execução já pega as correções da
+    semana). Sem internet, roda a cópia que está em %ProgramData%\SnakeOptimizer\app. A confiança é a mesma do RMM: o
+    repositório do GitHub (proteja a conta com 2FA).
+    #>
+    param ([Parameter(Mandatory)][string]$Tasks)
+
+    $repo = Get-SnakeOptimizerRepository
+    $url = "https://raw.githubusercontent.com/$repo/main/launch.ps1"
+    $local = Join-Path $script:SnakeOptimizerAutoRoot "app\SnakeOptimizer.Console.ps1"
+
+    $script = "[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072; " +
+        "`$s = `$null; try { `$s = Invoke-RestMethod -Uri '$url' -UseBasicParsing } catch { }; " +
+        "if (`$s) { & ([scriptblock]::Create(`$s)) -Mode Run -Task '$Tasks' } else { & '$local' -Action Run -Task '$Tasks' }; " +
+        "exit `$LASTEXITCODE"
+
+    return [PSCustomObject]@{
+        Executable = (Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe")
+        Arguments  = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"$script`""
+    }
+}
+
+
+function Register-SnakeOptimizerAutoTask {
+    # Cria (ou troca) uma tarefa: SYSTEM, elevada, sem janela. Não começa na bateria; com o PC desligado na hora, roda
+    # quando ele ligar. Uma execução não começa em cima da outra.
+    param (
+        [Parameter(Mandatory)][string]$Plan,
+        [Parameter(Mandatory)][System.DayOfWeek[]]$Days,
+        [Parameter(Mandatory)][datetime]$At
+    )
+
+    $definition = $script:SnakeOptimizerAutoPlans[$Plan]
+    $command = Get-SnakeOptimizerAutoTaskCommand -Tasks $definition.Tasks
+
+    $action = New-ScheduledTaskAction -Execute $command.Executable -Argument $command.Arguments
+    $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $Days -At $At
+    $principal = New-ScheduledTaskPrincipal -UserId "S-1-5-18" -LogonType ServiceAccount -RunLevel Highest
+    $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Hours 4)
+    $description = "SnakeOptimizer (Snake Tech): manutenção $($definition.Label) automática ($($definition.Tasks)). Não reinicia o PC. Para remover: SnakeOptimizer > Manutenção > Manutenção automática."
+
+    $task = New-ScheduledTask -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description $description
+    [void](Register-ScheduledTask -TaskPath $script:SnakeOptimizerAutoTaskPath -TaskName $definition.Name -InputObject $task -Force -ErrorAction Stop)
+}
+
+
+function Unregister-SnakeOptimizerAutoTask {
+    param ([Parameter(Mandatory)][string]$Plan)
+
+    $name = $script:SnakeOptimizerAutoPlans[$Plan].Name
+    if (Get-ScheduledTask -TaskPath $script:SnakeOptimizerAutoTaskPath -TaskName $name -ErrorAction SilentlyContinue) {
+        Unregister-ScheduledTask -TaskPath $script:SnakeOptimizerAutoTaskPath -TaskName $name -Confirm:$false -ErrorAction Stop
+    }
+}
+
+
+function Get-SnakeOptimizerAutoStatus {
+    # Situação das duas tarefas: existe, ligada, próxima e última execução.
+    foreach ($plan in $script:SnakeOptimizerAutoPlans.Keys) {
+        $definition = $script:SnakeOptimizerAutoPlans[$plan]
+        $task = Get-ScheduledTask -TaskPath $script:SnakeOptimizerAutoTaskPath -TaskName $definition.Name -ErrorAction SilentlyContinue
+        $info = $(if ($task) { Get-ScheduledTaskInfo -InputObject $task -ErrorAction SilentlyContinue } else { $null })
+        $days = $(if ($task) { @($task.Triggers | ForEach-Object { $_.DaysOfWeek }) } else { @() })
+
+        [PSCustomObject]@{
+            Plan      = $plan
+            Label     = $definition.Label
+            Installed = [bool]$task
+            Enabled   = [bool]($task -and $task.State -ne "Disabled")
+            NextRun   = $(if ($info -and $info.NextRunTime -and $info.NextRunTime.Year -gt 2000) { $info.NextRunTime } else { $null })
+            LastRun   = $(if ($info -and $info.LastRunTime -and $info.LastRunTime.Year -gt 2000) { $info.LastRunTime } else { $null })
+            Days      = $days
+        }
+    }
+}
+
+
+function Get-SnakeOptimizerAutoPlanName {
+    # "leve", "completa" ou "manual/RMM", pela lista de tarefas de uma execução.
+    param ([string]$Tasks)
+
+    foreach ($plan in $script:SnakeOptimizerAutoPlans.Keys) {
+        $planTasks = @($script:SnakeOptimizerAutoPlans[$plan].Tasks -split ',')
+        $ordered = @($script:SnakeOptimizerUnattendedTasks.Keys | Where-Object { $planTasks -contains $_ }) -join ","
+        if ($ordered -eq $Tasks) { return $script:SnakeOptimizerAutoPlans[$plan].Label }
+    }
+
+    return "manual/RMM"
+}
+
+
+function Show-SnakeOptimizerAutoMaintenance {
+    param ([switch]$PassThru)
+
+    $title = "Manutenção automática"
+    Enter-SnakeOptimizerAction -Title $title
+
+    if (-not (Test-SnakeOptimizerElevation -Reason "A manutenção automática exige privilégios de Administrador.")) {
+        Exit-SnakeOptimizerToolEarly -Title $title -Kind Failed -Detail "sem privilégios de Administrador" -PassThru:$PassThru
+        return
+    }
+
+    $light = $script:SnakeOptimizerAutoPlans.leve.Tasks
+    $full = $script:SnakeOptimizerAutoPlans.completa.Tasks
+    Write-SnakeOptimizerStatus -Type Info -Message "Roda sozinho, em segundo plano, como o sistema: sem janela e sem perguntas. Nunca reinicia o PC (avisa no histórico quando precisa). No notebook, só na tomada."
+    Write-SnakeOptimizerKeyValue -Label "Leve (diária)" -Value "limpeza rápida, cache DNS, atualizações do Windows e relatório" -LabelWidth 22
+    Write-SnakeOptimizerKeyValue -Label "Completa (semanal)" -Value "ponto de restauração, limpeza, WinSxS, DISM + SFC, atualizações, hora, DNS e relatório" -LabelWidth 22
+
+    # Situação atual.
+    Write-SnakeOptimizerSection -Title "Agendamento"
+    $status = @(Get-SnakeOptimizerAutoStatus)
+    $dayNames = @{ Sunday = "dom"; Monday = "seg"; Tuesday = "ter"; Wednesday = "qua"; Thursday = "qui"; Friday = "sex"; Saturday = "sáb" }
+
+    foreach ($item in $status) {
+        $value = $(if (-not $item.Installed) { "desligada" }
+            elseif (-not $item.Enabled) { "desativada no Agendador de Tarefas" }
+            else {
+                $daysText = $(if (@($item.Days).Count -ge 7) { "todo dia" } else { (@($item.Days | ForEach-Object { $dayNames[[string]$_] }) -join ", ") })
+                "ligada ($daysText)$(if ($item.NextRun) { "; próxima: $(Format-SnakeOptimizerDateTime -When $item.NextRun)" })"
+            })
+        Write-SnakeOptimizerKeyValue -Label "Manutenção $($item.Label)" -Value $value -LabelWidth 22
+    }
+
+    # As últimas execuções (da manutenção automática e do RMM).
+    $history = @(Get-SnakeOptimizerAutoHistory | Select-Object -First 7)
+    if ($history.Count -gt 0) {
+        Write-SnakeOptimizerSection -Title "Últimas execuções"
+        foreach ($run in $history) {
+            $when = $(try { (Get-Date ([datetime]::Parse($run.At, [Globalization.CultureInfo]::InvariantCulture))).ToString("dd/MM HH:mm") } catch { $run.At })
+            $outcome = $(switch ([int]$run.Code) { 0 { "tudo certo" } 1 { "com alertas" } default { "com falha" } })
+            $problems = @($run.Items | Where-Object { $_.Resultado -notmatch '^OK' } | ForEach-Object { $_.Tarefa })
+            $text = "$(Get-SnakeOptimizerAutoPlanName -Tasks $run.Tasks) · $outcome$(if ($problems) { " ($($problems -join ', '))" }) · $($run.Minutes) min$(if ($run.Reboot) { ' · PEDE REINÍCIO' })"
+            Write-SnakeOptimizerKeyValue -Label $when -Value $text -LabelWidth 12 -Level $(if ([int]$run.Code -ge 2) { "Warn" } else { "Normal" })
+        }
+
+        $lastReport = @($history | Where-Object { $_.Report } | Select-Object -First 1)
+        if ($lastReport) { Write-SnakeOptimizerKeyValue -Label "Último relatório" -Value $lastReport[0].Report -LabelWidth 22 }
+    }
+    else {
+        Write-SnakeOptimizerStatus -Type Info -Message "Ainda não houve nenhuma execução automática neste PC."
+    }
+
+    Write-Host ""
+    $options = @(
+        @{ Key = "1"; Label = "Ligar: leve de segunda a sábado + completa no domingo"; Description = "Recomendado. Leve às 12h; completa no domingo às 12h (com o PC desligado, roda quando ligar)."; Accent = $true },
+        @{ Key = "2"; Label = "Ligar só a leve, todo dia"; Description = "Limpeza, DNS, atualizações e relatório todo dia às 12h." },
+        @{ Key = "3"; Label = "Ligar só a completa, uma vez por semana"; Description = "Domingo às 12h." },
+        @{ Key = "4"; Label = "Rodar a leve agora"; Description = "Para testar: roda em segundo plano e aparece aqui nas últimas execuções quando terminar." },
+        @{ Key = "5"; Label = "Desligar a manutenção automática"; Description = "Remove as tarefas. O histórico e os relatórios ficam." },
+        @{ Key = "X"; Label = "Voltar"; Exit = $true }
+    )
+
+    $answer = Read-SnakeOptimizerChoice -Message "O que fazer?" -Options $options -DefaultKey "X" -ShowMenu -TextPrompt "Opção (número, X = voltar)"
+
+    if ([string]::IsNullOrWhiteSpace($answer) -or $answer -eq "X") {
+        Exit-SnakeOptimizerAction -Result $null
+        return
+    }
+
+    $noon = (Get-Date).Date.AddHours(12)
+    $all = [System.DayOfWeek[]]@(0..6)
+    $weekdays = [System.DayOfWeek[]]@(1..6)
+
+    try {
+        switch ($answer) {
+            "1" {
+                Register-SnakeOptimizerAutoTask -Plan leve -Days $weekdays -At $noon
+                Register-SnakeOptimizerAutoTask -Plan completa -Days ([System.DayOfWeek[]]@([System.DayOfWeek]::Sunday)) -At $noon
+                $final = New-SnakeOptimizerResult -Kind Ok -Detail "leve de segunda a sábado e completa no domingo, às 12h" -Title $title
+            }
+            "2" {
+                Register-SnakeOptimizerAutoTask -Plan leve -Days $all -At $noon
+                Unregister-SnakeOptimizerAutoTask -Plan completa
+                $final = New-SnakeOptimizerResult -Kind Ok -Detail "leve todo dia, às 12h" -Title $title
+            }
+            "3" {
+                Register-SnakeOptimizerAutoTask -Plan completa -Days ([System.DayOfWeek[]]@([System.DayOfWeek]::Sunday)) -At $noon
+                Unregister-SnakeOptimizerAutoTask -Plan leve
+                $final = New-SnakeOptimizerResult -Kind Ok -Detail "completa no domingo, às 12h" -Title $title
+            }
+            "4" {
+                $name = $script:SnakeOptimizerAutoPlans.leve.Name
+                if (-not (Get-ScheduledTask -TaskPath $script:SnakeOptimizerAutoTaskPath -TaskName $name -ErrorAction SilentlyContinue)) {
+                    Write-SnakeOptimizerStatus -Type Warning -Message "A manutenção leve não está ligada: ligue (opção 1 ou 2) e depois rode."
+                    $final = New-SnakeOptimizerResult -Kind Skipped -Detail "manutenção leve não está ligada" -Title $title
+                }
+                else {
+                    Start-ScheduledTask -TaskPath $script:SnakeOptimizerAutoTaskPath -TaskName $name -ErrorAction Stop
+                    Write-SnakeOptimizerStatus -Type Success -Message "Manutenção leve iniciada em segundo plano. Leva de 5 a 30 minutos (mais se houver atualização). Abra esta tela depois para ver o resultado."
+                    $final = New-SnakeOptimizerResult -Kind Ok -Detail "manutenção leve iniciada em segundo plano" -Title $title
+                }
+            }
+            "5" {
+                foreach ($plan in $script:SnakeOptimizerAutoPlans.Keys) { Unregister-SnakeOptimizerAutoTask -Plan $plan }
+                Write-SnakeOptimizerStatus -Type Success -Message "Manutenção automática desligada. Nada mais roda sozinho."
+                $final = New-SnakeOptimizerResult -Kind Ok -Detail "desligada" -Title $title
+            }
+        }
+
+        if ($answer -in "1", "2", "3") {
+            Write-SnakeOptimizerStatus -Type Success -Message "Manutenção automática ligada: $($final.Detail). Ela baixa o SnakeOptimizer atualizado a cada execução."
+        }
+    }
+    catch {
+        Write-SnakeOptimizerStatus -Type Error -Message "Não foi possível mudar o agendamento: $($_.Exception.Message)"
+        $final = New-SnakeOptimizerResult -Kind Failed -Detail $_.Exception.Message -Title $title
+    }
+
+    if ($PassThru) { $final }
+    Exit-SnakeOptimizerAction -Result $final
 }
 
 

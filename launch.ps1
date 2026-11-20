@@ -29,7 +29,7 @@
 
 .PARAMETER Task
     So no modo Run: tarefas separadas por virgula. ponto-restauracao, limpeza-rapida, winsxs, dism, sfc, dism-sfc,
-    fila-impressao, hora, dns, rede. Ex.: $env:SO_MODE='Run'; $env:SO_TASK='limpeza-rapida,dns'; irm <url> | iex
+    atualizacoes, fila-impressao, hora, dns, rede, verificar. Ex.: $env:SO_MODE='Run'; $env:SO_TASK='limpeza-rapida,dns'; irm <url> | iex
 
 .PARAMETER Action
     So no modo Gui: o item que a janela executa ao abrir. Exemplos: maintenance.recommended, performance.boost,
@@ -112,11 +112,37 @@ function Get-InstallRoot {
     return (Join-Path $env:LOCALAPPDATA $AppName)
 }
 
+function Protect-InstallRoot {
+    # %ProgramData% deixa qualquer usuario criar e alterar arquivos nas pastas novas. Como a manutencao automatica roda
+    # o que esta aqui como SYSTEM, a pasta fica so com Administradores e SYSTEM alterando; os usuarios so leem.
+    param ([string]$Root)
+
+    if (-not (Test-IsAdmin) -or $Root -notlike "$env:ProgramData*") { return }
+
+    try {
+        $acl = New-Object System.Security.AccessControl.DirectorySecurity
+        $acl.SetAccessRuleProtection($true, $false)
+        $inherit = [System.Security.AccessControl.InheritanceFlags]"ContainerInherit, ObjectInherit"
+        $none = [System.Security.AccessControl.PropagationFlags]::None
+        foreach ($sid in "S-1-5-18", "S-1-5-32-544") {
+            $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule((New-Object System.Security.Principal.SecurityIdentifier($sid)), "FullControl", $inherit, $none, "Allow")))
+        }
+        $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule((New-Object System.Security.Principal.SecurityIdentifier("S-1-5-32-545")), "ReadAndExecute", $inherit, $none, "Allow")))
+        Set-Acl -LiteralPath $Root -AclObject $acl
+    }
+    catch {
+        Write-Step "Nao foi possivel proteger a pasta $Root ($($_.Exception.Message))." Yellow
+    }
+}
+
 function Install-App {
     param ([string]$Root)
 
     $appDir = Join-Path $Root "app"
     $gui = Join-Path $appDir "$AppName.Gui.ps1"
+
+    if (-not (Test-Path -LiteralPath $Root)) { New-Item -ItemType Directory -Path $Root -Force | Out-Null }
+    Protect-InstallRoot -Root $Root
 
     if ($NoUpdate -and (Test-Path -LiteralPath $gui)) {
         Write-Step "Usando a copia local em $appDir"
@@ -139,7 +165,17 @@ function Install-App {
 
     try {
         Write-Step "Baixando $src"
-        Invoke-WebRequest -Uri $src -OutFile $zip -UseBasicParsing
+        try {
+            Invoke-WebRequest -Uri $src -OutFile $zip -UseBasicParsing
+        }
+        catch {
+            # Sem internet (ou GitHub fora do ar): a copia que ja esta no PC serve.
+            if (Test-Path -LiteralPath $gui) {
+                Write-Step "Nao foi possivel baixar ($($_.Exception.Message)); usando a copia local." Yellow
+                return $appDir
+            }
+            throw
+        }
 
         if (-not [string]::IsNullOrWhiteSpace($Sha256)) {
             $hash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash
