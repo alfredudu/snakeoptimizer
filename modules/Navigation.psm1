@@ -252,8 +252,14 @@ function Get-SnakeOptimizerNavigation {
             -Keywords "trim ssd desfragmentar desfragmentação hdd defrag disco lento" `
             -Description "Deixa o disco do Windows mais rápido: o próprio Windows escolhe o certo para SSD ou HD" -Command "Start-SnakeOptimizerDriveOptimization"),
         (New-SnakeOptimizerNavItem -Id "repair.office" -Label "Reparar o Microsoft Office" -Group "Programas e serviços" -Admin -Accent `
-            -Keywords "office word excel outlook powerpoint 365 travando não abre licença ativação produto não licenciado login conta cache suplemento clicktorun reparo online rápido" `
-            -Description "Limpa o cache, redefine login e ativação ou faz o reparo rápido ou online do Office" -Command "Invoke-SnakeOptimizerOfficeRepair"),
+            -Keywords "office word excel outlook powerpoint 365 travando não abre licença ativação produto não licenciado login conta cache suplemento clicktorun reparo online rápido teams tela branca notificação atualizar atualização não atualiza erro update" `
+            -Description "Atualizar, Office com problema ou que não atualiza, cache do Office e do Teams, login e ativação, reparo rápido ou online" -Command "Invoke-SnakeOptimizerOfficeRepair"),
+        (New-SnakeOptimizerNavItem -Id "repair.office-remove" -Label "Remover o Office por completo" -Group "Programas e serviços" -Admin `
+            -Keywords "office desinstalar remover apagar scrub limpeza profunda reinstalar office quebrado não desinstala não instala por cima 2016 2019 2021 2024 365" `
+            -Description "Apaga a instalação do Office para reinstalar do zero; mantém os perfis do Outlook e faz backup das personalizações" -Command "Invoke-SnakeOptimizerOfficeRemoval"),
+        (New-SnakeOptimizerNavItem -Id "repair.office-restore" -Label "Restaurar backup do Office" -Group "Programas e serviços" `
+            -Keywords "office outlook perfil perfis assinatura assinaturas modelos dicionário regras autocompletar faixa de opções backup restaurar importar" `
+            -Description "Devolve perfis do Outlook, assinaturas, modelos, dicionário e autocompletar do backup feito na remoção" -Command "Invoke-SnakeOptimizerOfficeRestore"),
         (New-SnakeOptimizerNavItem -Id "repair.print-spooler" -Label "Destravar a fila de impressão" -Group "Programas e serviços" -Admin `
             -Keywords "impressora impressão fila travada presa spooler spool documento preso não imprime cancelar" `
             -Description "Para o Spooler, apaga os documentos presos na fila e religa a impressão" -Command "Invoke-SnakeOptimizerPrintSpoolerReset"),

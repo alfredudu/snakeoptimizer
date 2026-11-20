@@ -1,5 +1,13 @@
 # Histórico de mudanças do SnakeOptimizer
 
+## 1.2 — 20/11/2026
+
+- **Modo silencioso para RMM** (`SO_MODE=Run`, `SO_TASK=...`): limpeza, DISM/SFC, WinSxS, fila de impressão, hora, DNS e rede, sem janela e sem perguntas, com código de saída.
+- **Office em níveis** (Reparar o Office): 1 Atualizar; 2 Limpar cache; 3 Office com problema ou não atualiza (limpa o cache, reinicia o serviço do Office, religa-o se estava desativado, força a atualização); 4 Login e ativação; 5 Reparo rápido; 6 Reparo online; 7 Cache do Teams.
+- **Remover o Office por completo** agora **mantém os perfis do Outlook**, as assinaturas padrão e a faixa de opções. Antes de remover, guarda um backup na pasta do usuário: registro do Outlook, assinaturas, modelos, dicionário, regras, autocompletar, faixa de opções e um inventário dos .pst/.ost.
+- **Restaurar backup do Office** (Reparo): devolve só o que falta, importa os perfis do Outlook se não existirem (ou mescla, se pedido) e confere se os .pst/.ost continuam no lugar.
+- Limpeza do cache DNS como tarefa própria.
+
 ## 1.1 — 20/11/2026
 
 - **Reparar o Microsoft Office** (Reparo): limpar cache (suplementos e OfficeFileCache), redefinir login e ativação, reparo rápido e reparo online do Clique para Executar. Fecha o Office antes, perguntando.

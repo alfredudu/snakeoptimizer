@@ -24,6 +24,12 @@
     Console - abre o menu de texto no terminal atual.
     Check   - verificacao rapida, so leitura. Codigo de saida: 0 ok, 1 atencao, 2 critico, 3 nao avaliado. Ideal p/ RMM.
     Report  - gera o relatorio HTML/TXT (em -ReportDirectory, ou %ProgramData%\SnakeOptimizer\reports).
+    Run     - modo silencioso para RMM: roda as tarefas de -Task sem perguntar nada. Exige Administrador/SYSTEM.
+              Codigo de saida: 0 ok, 1 alertas, 2 falha, 3 sem Administrador, 4 tarefa desconhecida.
+
+.PARAMETER Task
+    So no modo Run: tarefas separadas por virgula. ponto-restauracao, limpeza-rapida, winsxs, dism, sfc, dism-sfc,
+    fila-impressao, hora, dns, rede. Ex.: $env:SO_MODE='Run'; $env:SO_TASK='limpeza-rapida,dns'; irm <url> | iex
 
 .PARAMETER Action
     So no modo Gui: o item que a janela executa ao abrir. Exemplos: maintenance.recommended, performance.boost,
@@ -48,10 +54,12 @@
 #>
 [CmdletBinding()]
 param (
-    [ValidateSet("Gui", "Console", "Check", "Report")]
+    [ValidateSet("Gui", "Console", "Check", "Report", "Run")]
     [string]$Mode = $(if ($env:SO_MODE) { $env:SO_MODE } else { "Gui" }),
 
     [string]$Action = $env:SO_ACTION,
+
+    [string]$Task = $env:SO_TASK,
 
     [string]$Page = $env:SO_PAGE,
 
@@ -254,6 +262,14 @@ try {
             # nao fechar o terminal do tecnico: use "...| iex; exit $LASTEXITCODE".
             if ($PSCommandPath) { exit $global:LASTEXITCODE }
         }
+        "Run" {
+            # -NonInteractive: se alguma acao tentar perguntar algo, falha na hora em vez de ficar esperando para sempre.
+            $runArgs = @("-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $appDir "$AppName.Console.ps1"), "-Action", "Run")
+            if ($Task) { $runArgs += @("-Task", $Task) }
+            & $ps @runArgs
+            $global:LASTEXITCODE = $LASTEXITCODE
+            if ($PSCommandPath) { exit $global:LASTEXITCODE }
+        }
         "Report" {
             if ([string]::IsNullOrWhiteSpace($ReportDirectory)) { $ReportDirectory = Join-Path $root "reports" }
             & $ps -NoProfile -ExecutionPolicy Bypass -File (Join-Path $appDir "$AppName.Console.ps1") -Action Report -ReportDirectory $ReportDirectory
@@ -266,5 +282,5 @@ catch {
     $global:LASTEXITCODE = 1
 }
 finally {
-    Remove-Item Env:SO_ACTION, Env:SO_MODE, Env:SO_PAGE, Env:SO_SOURCE, Env:SO_SHA256 -ErrorAction SilentlyContinue
+    Remove-Item Env:SO_ACTION, Env:SO_MODE, Env:SO_PAGE, Env:SO_SOURCE, Env:SO_SHA256, Env:SO_TASK -ErrorAction SilentlyContinue
 }

@@ -42,7 +42,9 @@ Ações mais usadas (lista completa com `-ListActions`):
 | `updates.repair` | Corrigir o Windows Update |
 | `network.repair` | Reparar rede e DNS (IP, DNS, ARP, Winsock, TCP/IP) |
 | `network.proxy-reset` | Remover proxy travado |
-| `repair.office` | Reparar o Office: cache, login/ativação, reparo rápido ou online |
+| `repair.office` | Office e Teams: atualizar, "com problema / não atualiza", cache, login/ativação, reparo rápido ou online, cache do Teams |
+| `repair.office-remove` | Remover o Office por completo (mantém os perfis do Outlook e faz backup das personalizações) |
+| `repair.office-restore` | Restaurar backup do Office (perfis, assinaturas, modelos, dicionário, autocompletar) |
 | `repair.print-spooler` | Destravar a fila de impressão |
 | `repair.store` | Redefinir a Microsoft Store |
 | `repair.time-sync` | Acertar data e hora |
@@ -58,13 +60,33 @@ Ações mais usadas (lista completa com `-ListActions`):
 | Relatório HTML/TXT em `%ProgramData%\SnakeOptimizer\reports` | `$env:SO_MODE='Report'; irm <url>/launch.ps1 \| iex` |
 | Abrir a janela na tela do usuário logado | `irm <url>/launch.ps1 \| iex` (detecta SYSTEM e abre na sessão do usuário) |
 
+### Modo silencioso (manutenção pelo RMM, sem janela e sem perguntas)
+
+```powershell
+$env:SO_MODE='Run'; $env:SO_TASK='limpeza-rapida,dns'; irm links.snaketech.com.br/otimizar | iex; exit $LASTEXITCODE
+```
+
+| Tarefa (`SO_TASK`) | O que faz |
+|---|---|
+| `ponto-restauracao` | Cria um ponto de restauração |
+| `limpeza-rapida` | Temporários, caches e logs (não esvazia a Lixeira) |
+| `winsxs` | Limpa o repositório de componentes |
+| `dism` / `sfc` / `dism-sfc` | Repara a imagem e os arquivos do Windows |
+| `fila-impressao` | Destrava a fila de impressão |
+| `hora` | Sincroniza data e hora |
+| `dns` | Limpa o cache DNS e ARP e registra o DNS |
+| `rede` | Reparo completo de rede (IP, DNS, Winsock, TCP/IP) |
+
+Várias tarefas separadas por vírgula rodam sempre na ordem da tabela. Códigos de saída: `0` tudo ok, `1` alguma com aviso, `2` alguma falhou, `3` sem privilégios de administrador, `4` tarefa desconhecida. Sem `SO_TASK`, lista as tarefas.
+
 Como SYSTEM não tem área de trabalho, no modo janela o launcher cria uma tarefa agendada temporária que abre o SnakeOptimizer na sessão do usuário logado (elevada se ele for administrador) e remove a tarefa em seguida. Você acompanha pelo acesso remoto.
 
 ### Parâmetros do launcher
 
 | Parâmetro | Variável de ambiente | Descrição |
 |---|---|---|
-| `-Mode Gui\|Console\|Check\|Report` | `SO_MODE` | Padrão `Gui` |
+| `-Mode Gui\|Console\|Check\|Report\|Run` | `SO_MODE` | Padrão `Gui` |
+| `-Task <tarefas>` | `SO_TASK` | Tarefas do modo `Run` |
 | `-Action <id>` | `SO_ACTION` | Item que a janela executa ao abrir |
 | `-Page <página>` | `SO_PAGE` | Página inicial (`cleanup`, `repair`, `network`...) |
 | `-Json` | — | Saída JSON no modo `Check` |

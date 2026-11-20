@@ -18,6 +18,13 @@
                Não pede Administrador, não grava log e não pergunta nada, então serve para tarefas e scripts. O código
                de saída diz o resultado: 0 tudo em dia, 1 pontos de atenção, 2 algo crítico, 3 não foi possível avaliar.
 
+    Run      - modo silencioso (RMM): roda as tarefas de -Task sem perguntar nada e termina. Exige Administrador (não
+               reabre pedindo). Código de saída: 0 ok, 1 alertas, 2 falha, 3 sem Administrador, 4 tarefa desconhecida.
+
+.PARAMETER Task
+    Somente com -Action Run: uma ou mais tarefas separadas por vírgula (ponto-restauracao, limpeza-rapida, winsxs, dism,
+    sfc, dism-sfc, fila-impressao, hora, dns, rede). Sem -Task, lista as tarefas.
+
 .PARAMETER Json
     Somente com -Action Check: escreve o resultado como JSON (UTF-8) em vez do texto, e nada mais na saída.
 
@@ -34,6 +41,8 @@ param (
 
     [string]$ReportDirectory,
 
+    [string]$Task,
+
     [switch]$Json,
 
     [switch]$PauseAtEnd
@@ -43,11 +52,11 @@ $ErrorActionPreference = "Continue"
 
 # A ação é conferida aqui, e não com ValidateSet: um nome errado ("-Action Relatorio") recebe a lista em português, e
 # não o erro em inglês do PowerShell. Maiúsculas e minúsculas não importam.
-$knownActions = @("Menu", "Report", "Shortcut", "ScheduledMaintenance", "Check")
+$knownActions = @("Menu", "Report", "Shortcut", "ScheduledMaintenance", "Check", "Run")
 $matchedAction = @($knownActions | Where-Object { $_ -ieq $Action })
 
 if ($matchedAction.Count -eq 0) {
-    Write-Host "Ação desconhecida: '$Action'. Use -Action Menu, Report, Shortcut, ScheduledMaintenance ou Check." -ForegroundColor Red
+    Write-Host "Ação desconhecida: '$Action'. Use -Action Menu, Report, Shortcut, ScheduledMaintenance, Check ou Run." -ForegroundColor Red
     exit 1
 }
 
@@ -119,7 +128,13 @@ if ($Action -eq "Report") {
 # O atalho é criado pela pessoa que executa (a Área de Trabalho dela); elevar poderia usar o perfil de outro usuário.
 # A manutenção agendada roda em segundo plano com o usuário logado e sem elevação, então não há quem aprove o pedido.
 # A verificação rápida só lê e é feita para scripts: reabrir como Administrador abriria outra janela e perderia a saída.
-if ($Action -notin "Shortcut", "ScheduledMaintenance", "Check") {
+# O modo silencioso roda sem ninguém para aprovar o aviso do Windows: sem Administrador, termina com o código 3.
+if ($Action -eq "Run" -and -not [string]::IsNullOrWhiteSpace($Task) -and -not (Test-SnakeOptimizerAdministrator)) {
+    Write-Host "O modo silencioso (-Action Run) precisa rodar como Administrador ou SYSTEM." -ForegroundColor Red
+    exit 3
+}
+
+if ($Action -notin "Shortcut", "ScheduledMaintenance", "Check", "Run") {
     Restart-SnakeOptimizerAsAdministrator -ScriptPath $PSCommandPath -ExtraArguments $relaunchArguments
 }
 
@@ -165,6 +180,15 @@ try {
         }
 
         $exitCode = [int]$check.ExitCode
+    }
+    elseif ($Action -eq "Run") {
+        if ([string]::IsNullOrWhiteSpace($Task)) {
+            Write-Host "Tarefas do modo silencioso (use -Task tarefa1,tarefa2):" -ForegroundColor Cyan
+            Get-SnakeOptimizerUnattendedTasks | Format-Table -AutoSize | Out-String -Width 200 | Write-Host
+        }
+        else {
+            $exitCode = [int](Invoke-SnakeOptimizerUnattendedRun -Task $Task)
+        }
     }
     elseif ($Action -eq "Shortcut") {
         $shortcut = New-SnakeOptimizerAppShortcut -Location Desktop -Embedded -PassThru
