@@ -3,6 +3,8 @@
 *.psm1  text eol=crlf
 *.psd1  text eol=crlf
 *.cmd   text eol=crlf
+# Baixado sozinho pelo link "raw" do GitHub (sem passar pelo git): guardado já com CRLF, sem conversão.
+Abrir-SnakeOptimizer.cmd -text
 *.xaml  text eol=crlf
 *.md    text eol=crlf
 *.yml   text eol=crlf
