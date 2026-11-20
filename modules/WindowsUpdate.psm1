@@ -480,7 +480,8 @@ function Get-SnakeOptimizerWindowsUpdateHResultText {
         "0x80248007" { return "falta informação no cache do Windows Update; $cache" }
         "0x8007000D" { return "o que foi baixado veio corrompido; $cache" }
         "0x80246008" { return "o serviço de transferência do Windows (BITS) não respondeu; $cache" }
-        "0x80240034" { return "o download falhou" }
+        "0x80240034" { return "o download falhou (costuma ser download preso na fila ou cache corrompido); $cache" }
+        "0x800F0820" { return "a instalação foi cancelada no meio (reinício, desligamento ou outra atualização cumulativa ao mesmo tempo); reinicie e instale de novo, uma ferramenta de cada vez" }
         "0x8024001E" { return "o Windows estava desligando ou o serviço parou" }
         "0x8024000B" { return "a operação foi cancelada" }
         "0x8024001F" { return "sem conexão com a internet" }
