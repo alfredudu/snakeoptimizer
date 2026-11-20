@@ -40,7 +40,7 @@ function Test-SnakeOptimizerToolUserContext {
 }
 
 
-function Clear-SnakeOptimizerFolderContents {
+function Clear-SnakeOptimizerToolFolder {
     # Apaga o conteúdo de uma pasta (não a pasta). Devolve quantos itens saíram e quantos ficaram (em uso).
     param ([Parameter(Mandatory)][string]$Path)
 
@@ -146,7 +146,7 @@ function Clear-SnakeOptimizerOfficeCache {
     $kept = 0
 
     foreach ($target in $targets) {
-        $result = Clear-SnakeOptimizerFolderContents -Path $target.Path
+        $result = Clear-SnakeOptimizerToolFolder -Path $target.Path
         if (-not $result.Exists) { continue }
 
         $total += $result.Removed
@@ -181,7 +181,7 @@ function Reset-SnakeOptimizerOfficeIdentity {
     )
 
     foreach ($folder in $folders) {
-        $result = Clear-SnakeOptimizerFolderContents -Path $folder
+        $result = Clear-SnakeOptimizerToolFolder -Path $folder
         if ($result.Exists) {
             if ($result.Kept -gt 0) { $failed += $folder } else { $done += $folder }
         }
@@ -395,7 +395,7 @@ function Invoke-SnakeOptimizerPrintSpoolerReset {
         Write-SnakeOptimizerStatus -Type Success -Message "Spooler parado."
 
         Write-Progress -Activity $title -Status "apagando os trabalhos presos"
-        $cleared = Clear-SnakeOptimizerFolderContents -Path $spoolFolder
+        $cleared = Clear-SnakeOptimizerToolFolder -Path $spoolFolder
         Write-SnakeOptimizerStatus -Type $(if ($cleared.Kept) { "Warning" } else { "Success" }) -Message "Fila limpa: $($cleared.Removed) arquivos apagados$(if ($cleared.Kept) { ", $($cleared.Kept) em uso" })."
 
         Write-Progress -Activity $title -Status "religando o Spooler"
