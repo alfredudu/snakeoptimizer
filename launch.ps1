@@ -375,19 +375,29 @@ function Start-AgentInUserSession {
     $agent = Join-Path $Root "app\$AppName.Agent.ps1"
     if (-not (Test-Path -LiteralPath $agent)) { return $false }
 
-    $taskName = "$AppName-Monitor-$([guid]::NewGuid().ToString('N').Substring(0, 8))"
+    # Ja aberto: nada a fazer.
+    if (@(Get-CimInstance -ClassName Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
+            Where-Object { $_.CommandLine -match 'SnakeOptimizer\.Agent\.ps1' }).Count -gt 0) { return $true }
+
+    # A tarefa que abre o icone NAO e apagada logo depois: apagar uma tarefa em execucao pode encerrar o que ela abriu
+    # (o icone sumia). As antigas que ja terminaram saem aqui.
+    foreach ($old in @(Get-ScheduledTask -TaskPath $TaskPath -ErrorAction SilentlyContinue | Where-Object { $_.TaskName -like "Abrir-Monitor-*" -and $_.State -ne "Running" })) {
+        Unregister-ScheduledTask -TaskPath $TaskPath -TaskName $old.TaskName -Confirm:$false -ErrorAction SilentlyContinue
+    }
+
+    $taskName = "Abrir-Monitor-$([guid]::NewGuid().ToString('N').Substring(0, 8))"
     try {
         $taskAction = New-ScheduledTaskAction -Execute (Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe") `
             -Argument "-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File `"$agent`" -Machine"
         $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
         $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
-        Register-ScheduledTask -TaskName $taskName -Action $taskAction -Principal $principal -Settings $settings -Force | Out-Null
-        Start-ScheduledTask -TaskName $taskName
+        Register-ScheduledTask -TaskPath $TaskPath -TaskName $taskName -Action $taskAction -Principal $principal -Settings $settings `
+            -Description "SnakeOptimizer: abriu o icone da bandeja uma vez (removida na proxima abertura)." -Force | Out-Null
+        Start-ScheduledTask -TaskPath $TaskPath -TaskName $taskName
         Start-Sleep -Seconds 3
         return $true
     }
     catch { return $false }
-    finally { Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue }
 }
 
 function Start-GuiInUserSession {
