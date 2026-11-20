@@ -1,5 +1,11 @@
 # Histórico de mudanças do SnakeOptimizer
 
+## 1.5 — 20/11/2026
+
+- **Instalar no PC com atualização automática** (`-Mode Install`, ou Sobre > Versão nova e instalação no PC): cópia fixa em `%ProgramData%\SnakeOptimizer`, tarefa **Atualizador** (SYSTEM, ao ligar o PC e a cada 6 horas) e atalhos para todos os usuários, que abrem como Administrador. `-Mode Uninstall` remove tudo, menos relatórios e histórico.
+- O launcher confere o último commit publicado: se a cópia instalada já é ele, abre sem baixar nada; se não, baixa exatamente esse commit. A troca da pasta é segura (renomeia antes de apagar) e não acontece com o SnakeOptimizer aberto.
+- "Verificar nova versão" virou **Versão nova e instalação no PC**: compara a cópia instalada com o GitHub (antes procurava releases, que este repositório não publica).
+
 ## 1.4 — 20/11/2026
 
 - **Manutenção automática** (Manutenção): tarefas do Agendador que rodam como SYSTEM, sem janela. Leve (limpeza rápida, DNS, atualizações do Windows e relatório) de segunda a sábado e completa (ponto de restauração, limpeza, WinSxS, DISM + SFC, atualizações, hora, DNS e relatório) no domingo, às 12h; ou só uma das duas. Nunca reinicia o PC. Baixa a versão mais nova a cada execução (sem internet, usa a cópia local). As últimas execuções, com o que pediu atenção e o que pede reinício, aparecem na tela.

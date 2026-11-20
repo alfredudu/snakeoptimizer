@@ -1588,4 +1588,177 @@ function Show-SnakeOptimizerAutoMaintenance {
 }
 
 
+# ---------------------------------------------------------------------------
+# Instalação no PC e atualização automática do próprio SnakeOptimizer
+# ---------------------------------------------------------------------------
+
+function Get-SnakeOptimizerPublishedCommit {
+    # O último commit publicado na branch principal do GitHub (Sha, Date, Message), ou $null.
+    try {
+        Enable-SnakeOptimizerTls12
+        $r = Invoke-RestMethod -Uri "https://api.github.com/repos/$(Get-SnakeOptimizerRepository)/commits/main" -UseBasicParsing -TimeoutSec 15 `
+            -Headers @{ "User-Agent" = "SnakeOptimizer/$(Get-SnakeOptimizerBuild)"; "Accept" = "application/vnd.github+json" } -ErrorAction Stop
+        $date = $null
+        try { $date = ([datetime]::Parse([string]$r.commit.committer.date, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)).ToLocalTime() } catch { }
+        return [PSCustomObject]@{ Sha = [string]$r.sha; Date = $date; Message = (([string]$r.commit.message) -split "`n")[0].Trim() }
+    }
+    catch { return $null }
+}
+
+
+function Get-SnakeOptimizerInstallState {
+    # A instalação em %ProgramData%\SnakeOptimizer: cópia, versão anotada, Atualizador e atalhos.
+    $root = $script:SnakeOptimizerAutoRoot
+    $version = $null
+    try { $version = Get-Content -LiteralPath (Join-Path $root "versao-instalada.json") -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json } catch { }
+
+    $task = Get-ScheduledTask -TaskPath $script:SnakeOptimizerAutoTaskPath -TaskName "Atualizador" -ErrorAction SilentlyContinue
+    $info = $(if ($task) { Get-ScheduledTaskInfo -InputObject $task -ErrorAction SilentlyContinue } else { $null })
+    $log = Join-Path $root "atualizador.log"
+
+    return [PSCustomObject]@{
+        Root      = $root
+        AppExists = (Test-Path -LiteralPath (Join-Path $root "app\SnakeOptimizer.Gui.ps1"))
+        Launcher  = (Join-Path $root "launch.ps1")
+        Version   = $version
+        Updater   = [bool]$task
+        Enabled   = [bool]($task -and $task.State -ne "Disabled")
+        LastRun   = $(if ($info -and $info.LastRunTime -and $info.LastRunTime.Year -gt 2000) { $info.LastRunTime } else { $null })
+        NextRun   = $(if ($info -and $info.NextRunTime -and $info.NextRunTime.Year -gt 2000) { $info.NextRunTime } else { $null })
+        LogLines  = @($(if (Test-Path -LiteralPath $log) { Get-Content -LiteralPath $log -Encoding UTF8 -Tail 5 -ErrorAction SilentlyContinue }))
+        Running   = (Get-SnakeOptimizerAppRoot).TrimEnd("\") -ieq (Join-Path $root "app")
+    }
+}
+
+
+function Invoke-SnakeOptimizerLauncherMode {
+    # Roda o launcher (o desta cópia) em outro PowerShell, mostrando a saída: -Mode Install/Uninstall.
+    param ([Parameter(Mandatory)][ValidateSet("Install", "Uninstall")][string]$Mode)
+
+    $launcher = Join-Path (Get-SnakeOptimizerAppRoot) "launch.ps1"
+    if (-not (Test-Path -LiteralPath $launcher)) { throw "O launcher (launch.ps1) não está na pasta $(Get-SnakeOptimizerAppRoot)." }
+
+    $ps = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+    $output = & $ps -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $launcher -Mode $Mode -NoUpdate 2>&1
+    foreach ($line in @($output)) {
+        $text = ([string]$line) -replace '^\[SnakeOptimizer\]\s*', ''
+        if ($text.Trim()) { Write-SnakeOptimizerStatus -Type Info -Notice -Message $text }
+    }
+    return $LASTEXITCODE
+}
+
+
+function Show-SnakeOptimizerInstallation {
+    <#
+    Versão nova e instalação no PC. O SnakeOptimizer não é um serviço do Windows de verdade (é PowerShell, e um serviço
+    não mostra janela): a instalação deixa uma cópia fixa em %ProgramData%, a tarefa "Atualizador" (SYSTEM, ao ligar o PC
+    e a cada 6 horas), que faz o papel do serviço, e atalhos que abrem como Administrador e conferem a versão antes de abrir.
+    #>
+    param ([switch]$PassThru)
+
+    $title = "Versão nova e instalação no PC"
+    Enter-SnakeOptimizerAction -Title $title
+
+    Write-Host "  Confere no GitHub a última versão publicada e mostra se este PC tem o SnakeOptimizer instalado com atualização automática." -ForegroundColor DarkGray
+    Write-Host ""
+
+    $state = Get-SnakeOptimizerInstallState
+    $published = Get-SnakeOptimizerPublishedCommit
+
+    Write-SnakeOptimizerSection -Title "Versões"
+    if ($published) {
+        $when = $(if ($published.Date) { Format-SnakeOptimizerDateTime -When $published.Date } else { "" })
+        Write-SnakeOptimizerKeyValue -Label "Publicada no GitHub" -Value "$($published.Sha.Substring(0, 7)) · $when · $($published.Message)" -LabelWidth 22
+    }
+    else {
+        Write-SnakeOptimizerKeyValue -Label "Publicada no GitHub" -Value "não foi possível consultar agora (internet ou limite do GitHub)" -LabelWidth 22 -Level "Warn"
+    }
+
+    $installedSha = $(if ($state.Version -and $state.Version.Sha) { [string]$state.Version.Sha } else { "" })
+    if ($state.AppExists) {
+        $installedText = $(if ($installedSha) { "$($installedSha.Substring(0, 7)) · baixada em $(try { Format-SnakeOptimizerDateTime -When ([datetime]::Parse($state.Version.InstalledAt, [Globalization.CultureInfo]::InvariantCulture)) } catch { $state.Version.InstalledAt })" } else { "versão não anotada (instalada por um launcher antigo)" })
+        Write-SnakeOptimizerKeyValue -Label "Neste PC" -Value $installedText -LabelWidth 22
+    }
+    else {
+        Write-SnakeOptimizerKeyValue -Label "Neste PC" -Value "não instalado (só a cópia aberta agora, em $(Get-SnakeOptimizerAppRoot))" -LabelWidth 22
+    }
+
+    $upToDate = [bool]($published -and $installedSha -and $installedSha -eq $published.Sha)
+    $newer = [bool]($published -and $state.AppExists -and -not $upToDate)
+
+    Write-SnakeOptimizerSection -Title "Atualização automática"
+    if ($state.Updater) {
+        $value = $(if (-not $state.Enabled) { "desativado no Agendador de Tarefas" } else { "ligado (ao ligar o PC e a cada 6 horas)$(if ($state.LastRun) { "; última: $(Format-SnakeOptimizerDateTime -When $state.LastRun)" })" })
+        Write-SnakeOptimizerKeyValue -Label "Atualizador" -Value $value -LabelWidth 22 -Level $(if ($state.Enabled) { "Normal" } else { "Warn" })
+        foreach ($line in $state.LogLines) { Write-SnakeOptimizerStatus -Type Info -Notice -Message $line }
+    }
+    else {
+        Write-SnakeOptimizerKeyValue -Label "Atualizador" -Value "desligado" -LabelWidth 22
+    }
+
+    Write-Host ""
+    if ($upToDate) {
+        Write-SnakeOptimizerStatus -Type Success -Message "A cópia instalada é a versão mais nova publicada."
+    }
+    elseif ($newer -and $state.Updater) {
+        Write-SnakeOptimizerStatus -Type Warning -Message "Há versão nova. O Atualizador troca sozinho quando o SnakeOptimizer estiver fechado (em até 6 horas ou ao ligar o PC). Ou feche esta janela e abra pelo atalho: ele atualiza antes de abrir."
+    }
+    elseif ($newer) {
+        Write-SnakeOptimizerStatus -Type Warning -Message "Há versão nova. Feche e abra de novo pelo link ou pelo Abrir-SnakeOptimizer.cmd (eles baixam a mais nova), ou instale no PC para atualizar sozinho."
+    }
+
+    if ($state.Running -and $newer) {
+        Write-SnakeOptimizerStatus -Type Info -Notice -Message "Esta janela está aberta a partir da cópia instalada: a troca acontece depois que ela fechar."
+    }
+
+    $options = @(
+        @{ Key = "1"; Label = $(if ($state.Updater) { "Reinstalar / reparar a instalação" } else { "Instalar no PC com atualização automática" }); Accent = (-not $state.Updater)
+            Description = "Cópia fixa em $($state.Root), tarefa Atualizador (SYSTEM, ao ligar o PC e a cada 6 horas) e atalhos na Área de Trabalho e no Menu Iniciar para todos os usuários, abrindo como Administrador." },
+        @{ Key = "2"; Label = "Desinstalar do PC"; Description = "Remove o Atualizador, a manutenção automática e os atalhos. Os relatórios e o histórico ficam; a pasta do app sai quando o SnakeOptimizer estiver fechado." },
+        @{ Key = "X"; Label = "Voltar"; Exit = $true }
+    )
+
+    $answer = Read-SnakeOptimizerChoice -Message "O que fazer?" -Options $options -DefaultKey "X" -ShowMenu -TextPrompt "Opção (número, X = voltar)"
+
+    if ([string]::IsNullOrWhiteSpace($answer) -or $answer -eq "X") {
+        $final = $(if ($upToDate) { New-SnakeOptimizerResult -Kind Ok -Detail "versão mais nova" -Title $title }
+            elseif ($newer) { New-SnakeOptimizerResult -Kind Warning -Detail "há versão nova publicada" -Title $title }
+            else { $null })
+        if ($PassThru) { $final }
+        Exit-SnakeOptimizerAction -Result $final
+        return
+    }
+
+    if (-not (Test-SnakeOptimizerElevation -Reason "Instalar e desinstalar exigem privilégios de Administrador.")) {
+        Exit-SnakeOptimizerToolEarly -Title $title -Kind Failed -Detail "sem privilégios de Administrador" -PassThru:$PassThru
+        return
+    }
+
+    try {
+        if ($answer -eq "1") {
+            Write-SnakeOptimizerStatus -Type Running -Notice -Message "Instalando..."
+            $code = Invoke-SnakeOptimizerLauncherMode -Mode Install
+            $final = $(if ($code -eq 0) { New-SnakeOptimizerResult -Kind Ok -Detail "instalado com atualização automática" -Title $title }
+                else { New-SnakeOptimizerResult -Kind Failed -Detail "a instalação não terminou (veja acima)" -Title $title })
+        }
+        else {
+            if (-not (Confirm-SnakeOptimizerAction -Message "Desinstalar o SnakeOptimizer deste PC (Atualizador, manutenção automática e atalhos)?" -DefaultKey N)) {
+                $final = New-SnakeOptimizerResult -Kind Skipped -Detail "nada mudou" -Title $title
+            }
+            else {
+                [void](Invoke-SnakeOptimizerLauncherMode -Mode Uninstall)
+                $final = New-SnakeOptimizerResult -Kind Ok -Detail "desinstalado" -Title $title
+            }
+        }
+    }
+    catch {
+        Write-SnakeOptimizerStatus -Type Error -Message "Não foi possível: $($_.Exception.Message)"
+        $final = New-SnakeOptimizerResult -Kind Failed -Detail $_.Exception.Message -Title $title
+    }
+
+    if ($PassThru) { $final }
+    Exit-SnakeOptimizerAction -Result $final
+}
+
+
 Export-ModuleMember -Function *-SnakeOptimizer*

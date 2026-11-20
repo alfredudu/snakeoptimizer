@@ -64,6 +64,20 @@ Ações mais usadas (lista completa com `-ListActions`):
 
 Baixe o [`Abrir-SnakeOptimizer.cmd`](Abrir-SnakeOptimizer.cmd) e deixe na Área de Trabalho ou no pendrive. Ele pede o Administrador sozinho e abre sempre a versão mais nova.
 
+### Instalar no PC (atualiza sozinho)
+
+```powershell
+$env:SO_MODE='Install'; irm links.snaketech.com.br/otimizar | iex
+```
+
+Ou pela janela: **Sobre o SnakeOptimizer > Versão nova e instalação no PC**. A instalação deixa:
+
+- uma cópia fixa em `%ProgramData%\SnakeOptimizer\app` (só Administradores alteram);
+- a tarefa **`\SnakeOptimizer\Atualizador`** (SYSTEM), que roda 3 minutos depois de ligar o PC e a cada 6 horas. Ela só baixa quando há commit novo na `main` e não troca nada com o SnakeOptimizer aberto (tenta de novo depois). O registro fica em `%ProgramData%\SnakeOptimizer\atualizador.log`;
+- atalhos **SnakeOptimizer** na Área de Trabalho pública e no Menu Iniciar, que abrem como Administrador e conferem a versão antes de abrir.
+
+O SnakeOptimizer não vira um *serviço* do Windows no sentido estrito: é PowerShell, e um serviço não pode mostrar janela. A tarefa do Agendador como SYSTEM faz esse papel, como no CCleaner e em outros utilitários. Para remover: `$env:SO_MODE='Uninstall'; irm links.snaketech.com.br/otimizar | iex` (mantém relatórios e histórico).
+
 ### Manutenção automática
 
 Em **Manutenção > Manutenção automática**: leve de segunda a sábado e completa no domingo (ou só uma das duas), rodando como SYSTEM em segundo plano, sem reiniciar o PC. A tela mostra as últimas execuções e o último relatório.
@@ -95,7 +109,7 @@ Como SYSTEM não tem área de trabalho, no modo janela o launcher cria uma taref
 
 | Parâmetro | Variável de ambiente | Descrição |
 |---|---|---|
-| `-Mode Gui\|Console\|Check\|Report\|Run` | `SO_MODE` | Padrão `Gui` |
+| `-Mode Gui\|Console\|Check\|Report\|Run\|Install\|Update\|Uninstall` | `SO_MODE` | Padrão `Gui` |
 | `-Task <tarefas>` | `SO_TASK` | Tarefas do modo `Run` |
 | `-Action <id>` | `SO_ACTION` | Item que a janela executa ao abrir |
 | `-Page <página>` | `SO_PAGE` | Página inicial (`cleanup`, `repair`, `network`...) |

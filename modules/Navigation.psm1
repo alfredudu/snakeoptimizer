@@ -418,9 +418,9 @@ function Get-SnakeOptimizerNavigation {
         (New-SnakeOptimizerNavItem -Id "app.about" -Label "Versão e pastas" -Group "Versão e dados" `
             -Keywords "build powershell" `
             -Description "Qual versão está aberta, onde ela está instalada e onde ficam os logs e relatórios" -Command "Show-SnakeOptimizerAbout"),
-        (New-SnakeOptimizerNavItem -Id "app.update" -Label "Verificar nova versão" -Group "Versão e dados" `
-            -Keywords "atualizar atualização baixar release github" `
-            -Description "Vê se há uma versão mais nova do SnakeOptimizer e baixa o zip conferindo o SHA-256" -Command "Invoke-SnakeOptimizerUpdateCheck"),
+        (New-SnakeOptimizerNavItem -Id "app.update" -Label "Versão nova e instalação no PC" -Group "Versão e dados" -Accent `
+            -Keywords "atualizar atualização baixar github instalar serviço segundo plano atualizador desinstalar" `
+            -Description "Vê se há versão mais nova e instala no PC com atualização automática (tarefa Atualizador, ao ligar o PC e a cada 6 horas)" -Command "Show-SnakeOptimizerInstallation"),
         (New-SnakeOptimizerNavItem -Id "app.catalog" -Label "Conferir dados online" -Group "Versão e dados" `
             -Keywords "catálogo lista essenciais datas suporte" `
             -Description "Confere na internet a lista de essenciais e as datas de suporte do Windows mais recentes" -Command "Update-SnakeOptimizerOnlineData"),
