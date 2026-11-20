@@ -379,12 +379,23 @@ __SEARCH__
         return
     }
 
+    $installer = $session.CreateUpdateInstaller()
+
+    # O Windows instala uma coisa de cada vez: se as Configurações (ou o RMM) já estão instalando, espera elas terminarem
+    # em vez de falhar com "outra operação em andamento". A tela mostra que está esperando o Windows.
+    try {
+        while ([bool]$installer.IsBusy) {
+            $State.Phase = "EsperandoWindows"
+            Start-Sleep -Seconds 2
+        }
+    }
+    catch { }
+
     $State.Phase = "Instalando"
     $State.Percent = 0
     $State.Index = 0
     $State.Total = $toInstall.Count
 
-    $installer = $session.CreateUpdateInstaller()
     $installer.Updates = $toInstall
 
     try { $installer.AllowSourcePrompts = $false } catch { }
@@ -1075,6 +1086,13 @@ function Wait-SnakeOptimizerUpdateJob {
                 Write-Progress -Activity $activity -Status $status -PercentComplete ([math]::Max(0, [math]::Min(100, [int]$State.Percent)))
             }
         }
+        elseif ($State.Phase -eq "EsperandoWindows") {
+            if ($lastKey -ne "esperando") {
+                $lastKey = "esperando"
+                Write-SnakeOptimizerStatus -Type Info -Message "O próprio Windows Update está instalando outras atualizações agora (pelas Configurações). O SnakeOptimizer espera ele terminar e continua sozinho."
+                Write-Progress -Activity "Esperando o Windows Update" -Status "o Windows está instalando outras atualizações; acompanhe em Configurações > Windows Update"
+            }
+        }
         elseif ($lastKey -ne "preparando") {
             $lastKey = "preparando"
             # Antes de baixar, o Windows Update confere de novo as escolhidas, o que pode demorar.
@@ -1554,6 +1572,17 @@ function Set-SnakeOptimizerUpdateSearchView {
 }
 
 
+function Test-SnakeOptimizerLatestUpdatesOptIn {
+    # "Obtenha as atualizações mais recentes assim que elas estiverem disponíveis" (Configurações > Windows Update) ligado.
+    try {
+        return ([string](Get-ItemProperty -LiteralPath "HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings" -Name IsContinuousInnovationOptedIn -ErrorAction Stop).IsContinuousInnovationOptedIn -eq "1")
+    }
+    catch {
+        return $false
+    }
+}
+
+
 function Install-SnakeOptimizerWindowsUpdates {
     $title = "Instalar atualizações do Windows"
 
@@ -1620,21 +1649,35 @@ function Install-SnakeOptimizerWindowsUpdates {
             Write-SnakeOptimizerStatus -Type Info -Message "Por isso o Windows Update das Configurações pode mostrar ""atualizado"": o SnakeOptimizer pergunta direto ao serviço."
         }
 
-        # As opcionais (BrowseOnly: prévias e drivers opcionais) só aparecem quando o Windows Update não conhece o critério
-        # que as deixa de fora; o Windows não as instala sozinho, então elas vêm desmarcadas e com o aviso.
+        # As opcionais (BrowseOnly) vêm desmarcadas, como no Windows. A exceção espelha as Configurações: com "Obtenha as
+        # atualizações mais recentes assim que estiverem disponíveis" ligado, o Windows instala as prévias sozinho, então
+        # aqui elas também vêm marcadas (drivers opcionais continuam desmarcados).
+        $previewsOn = Test-SnakeOptimizerLatestUpdatesOptIn
         $options = @(
             foreach ($update in $updates) {
                 $optional = [bool](Get-SnakeOptimizerJsonValue -Object $update -Name "BrowseOnly" -Default $false)
+                $driver = [bool](Get-SnakeOptimizerJsonValue -Object $update -Name "Driver" -Default $false)
                 $parts = @()
-                if ($optional) { $parts += "opcional" }
-                if ([bool](Get-SnakeOptimizerJsonValue -Object $update -Name "Driver" -Default $false)) { $parts += "driver$(Get-SnakeOptimizerDriverPurposeText -Update $update -Prefix ' de ')" }
+                if ($optional) { $parts += $(if ($driver) { "opcional" } else { "prévia" }) }
+                if ($driver) { $parts += "driver$(Get-SnakeOptimizerDriverPurposeText -Update $update -Prefix ' de ')" }
                 $parts += Get-SnakeOptimizerUpdateSizeText -Update $update
-                @{ Key = $update.Id; Label = (Get-SnakeOptimizerUpdateOptionLabel -Update $update); Description = ($parts -join " · "); Selected = (-not $optional) }
+                @{ Key = $update.Id; Label = (Get-SnakeOptimizerUpdateOptionLabel -Update $update); Description = ($parts -join " · "); Selected = ((-not $optional) -or ($previewsOn -and -not $driver)) }
             }
         )
 
+        # As prévias desse botão o Windows só oferece para a própria tela, não para outros programas: elas aparecem nas
+        # Configurações e não aqui. Os dois usam o mesmo serviço e um não atrapalha o outro.
+        if ($previewsOn) {
+            Write-SnakeOptimizerStatus -Type Info -Message "O Windows está com ""Obtenha as atualizações mais recentes"" ligado: ele mesmo baixa as prévias do mês (""Atualização Prévia""), que só aparecem em Configurações > Windows Update. Pode deixar os dois rodando: usam o mesmo serviço, e o SnakeOptimizer espera se o Windows estiver instalando."
+        }
+
         if (@($updates | Where-Object { [bool](Get-SnakeOptimizerJsonValue -Object $_ -Name "BrowseOnly" -Default $false) }).Count -gt 0) {
-            Write-SnakeOptimizerStatus -Type Info -Message "As opcionais (prévias e drivers opcionais) vêm desmarcadas."
+            if ($previewsOn) {
+                Write-SnakeOptimizerStatus -Type Info -Message "As prévias vêm marcadas porque o Windows está com ""Obtenha as atualizações mais recentes"" ligado (ele também as instala). Drivers opcionais vêm desmarcados."
+            }
+            else {
+                Write-SnakeOptimizerStatus -Type Info -Message "As opcionais (prévias e drivers opcionais) vêm desmarcadas, como no Windows."
+            }
         }
 
         # Na janela, Confirmar só fica disponível com algo marcado: voltar sem escolha é o Cancelar.
