@@ -2238,6 +2238,7 @@ function Repair-SnakeOptimizerWindowsUpdate {
         $restart = New-Object System.Collections.ArrayList
         $moved = @()
         $stopProblem = ""
+        $cryptStuck = $false
 
         try {
             # Downloads presos na fila do BITS e na Otimização de Entrega (o "fica baixando e nunca termina").
@@ -2251,6 +2252,10 @@ function Repair-SnakeOptimizerWindowsUpdate {
                 foreach ($dependent in @($service.State.Dependents)) { if (-not $restart.Contains($dependent)) { [void]$restart.Add($dependent) } }
 
                 if (-not (Stop-SnakeOptimizerService -Name $service.Name)) {
+                    # Os Serviços de Criptografia muitas vezes não param (outro programa os segura). Eles só são
+                    # necessários para o catálogo de assinaturas: o resto do reparo (o cache que mais resolve) segue sem ele.
+                    if ($service.Name -eq "cryptsvc") { $cryptStuck = $true; continue }
+
                     $stopProblem = "o serviço $($service.Label) não parou em 30 segundos"
                     break
                 }
@@ -2258,10 +2263,17 @@ function Repair-SnakeOptimizerWindowsUpdate {
 
             if (-not $stopProblem) {
                 foreach ($folder in @(Get-SnakeOptimizerWindowsUpdateCacheFolders)) {
+                    if ($cryptStuck -and $folder.Name -eq "catroot2") {
+                        $row = New-SnakeOptimizerResult -Kind Skipped -Detail "ficou como estava: os Serviços de Criptografia não pararam (some depois de reiniciar)"
+                        $row.Etapa = $folder.Label
+                        $rows += $row
+                        continue
+                    }
+
                     Write-Progress -Activity $title -Status "pondo de lado: $($folder.Label)"
 
                     # Outro serviço (o orquestrador de atualizações) pode religar o Windows Update a qualquer momento.
-                    foreach ($service in $stopping) {
+                    foreach ($service in @($stopping | Where-Object { -not ($cryptStuck -and $_.Name -eq "cryptsvc") })) {
                         try { [void](Stop-SnakeOptimizerService -Name $service.Name -TimeoutSeconds 10) } catch { Write-Verbose "Parar $($service.Name): $($_.Exception.Message)" }
                     }
 
