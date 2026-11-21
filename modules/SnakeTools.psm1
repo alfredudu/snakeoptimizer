@@ -650,14 +650,30 @@ function Remove-SnakeOptimizerOfficeEverything {
 
     # 5. Registro.
     Write-Progress -Activity "Removendo o Office" -Status "limpando o registro"
-    $keys = @(
-        "HKLM:\SOFTWARE\Microsoft\Office", "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Office",
-        "HKLM:\SOFTWARE\Microsoft\AppVISV", "HKLM:\SOFTWARE\WOW6432Node\Microsoft\AppVISV",
-        "HKLM:\SYSTEM\CurrentControlSet\Services\ClickToRunSvc"
-    )
-    foreach ($key in $keys) {
+    # Em HKLM\...\Office ficam também os suplementos de OUTROS programas (Teams no Outlook, Adobe Acrobat, antivírus):
+    # Office\<Outlook|Excel|Word|...>\Addins. Esses ficam, para continuarem funcionando no Office novo; o resto sai.
+    # Uma parte que o Windows não deixa apagar (permissão) não impede a reinstalação: vira "sobra", sem pedir reinício.
+    $leftover = New-Object System.Collections.Generic.List[string]
+    foreach ($key in "HKLM:\SOFTWARE\Microsoft\Office", "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Office") {
         if (-not (Test-Path -LiteralPath $key)) { continue }
-        try { Remove-Item -LiteralPath $key -Recurse -Force -ErrorAction Stop; $done.Add($key) } catch { $failed.Add($key) }
+        $removedHere = 0
+        foreach ($child in @(Get-ChildItem -LiteralPath $key -ErrorAction SilentlyContinue)) {
+            $targets = @($child.PSPath)
+            if (@(Get-ChildItem -LiteralPath $child.PSPath -ErrorAction SilentlyContinue | Where-Object { $_.PSChildName -eq "Addins" }).Count -gt 0) {
+                # O aplicativo tem suplementos: só o que não é Addins sai.
+                $targets = @(Get-ChildItem -LiteralPath $child.PSPath -ErrorAction SilentlyContinue | Where-Object { $_.PSChildName -ne "Addins" } | ForEach-Object { $_.PSPath })
+            }
+            foreach ($target in $targets) {
+                try { Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction Stop; $removedHere++ }
+                catch { $leftover.Add((Convert-Path -LiteralPath $target -ErrorAction SilentlyContinue)) }
+            }
+        }
+        if ($removedHere -gt 0) { $done.Add("$key (sem os suplementos de outros programas)") }
+    }
+
+    foreach ($key in "HKLM:\SOFTWARE\Microsoft\AppVISV", "HKLM:\SOFTWARE\WOW6432Node\Microsoft\AppVISV", "HKLM:\SYSTEM\CurrentControlSet\Services\ClickToRunSvc") {
+        if (-not (Test-Path -LiteralPath $key)) { continue }
+        try { Remove-Item -LiteralPath $key -Recurse -Force -ErrorAction Stop; $done.Add($key) } catch { $leftover.Add($key) }
     }
 
     if ($IncludeUser) {
@@ -677,7 +693,7 @@ function Remove-SnakeOptimizerOfficeEverything {
     }
 
     Write-Progress -Activity "Removendo o Office" -Completed
-    return [PSCustomObject]@{ Done = $done; Failed = $failed }
+    return [PSCustomObject]@{ Done = $done; Failed = $failed; Leftover = $leftover }
 }
 
 
@@ -735,9 +751,18 @@ function Invoke-SnakeOptimizerOfficeRemoval {
         foreach ($item in $result.Done) { Write-SnakeOptimizerCommand -Command "removido: $item" }
 
         Write-Host ""
+        # Sobras no registro (o Windows não deixou apagar): não atrapalham a reinstalação nem pedem reinício.
+        if (@($result.Leftover).Count -gt 0) {
+            Write-SnakeOptimizerStatus -Type Info -Notice -Message "Ficou no registro, sem efeito na reinstalação (o Windows não deixou apagar): $(@($result.Leftover) -join '; ')."
+        }
+
         if ($result.Failed.Count -gt 0) {
-            Write-SnakeOptimizerStatus -Type Warning -Message "$($result.Done.Count) itens removidos; $($result.Failed.Count) não saíram (em uso): $($result.Failed -join '; '). Reinicie o PC e rode de novo para terminar."
+            Write-SnakeOptimizerStatus -Type Warning -Message "$($result.Done.Count) itens removidos; $($result.Failed.Count) não saíram (em uso ou sem permissão): $($result.Failed -join '; '). Reinicie o PC e rode de novo para terminar."
             $final = New-SnakeOptimizerResult -Kind Warning -Detail "$($result.Failed.Count) itens não removidos" -Title $title -Data @{ RebootRequired = $true }
+        }
+        elseif ($result.Done.Count -eq 0 -and @($result.Leftover).Count -gt 0) {
+            Write-SnakeOptimizerStatus -Type Success -Message "O Office já não está no PC; só ficaram as sobras de registro acima, que não atrapalham. Pode instalar o Office de novo."
+            $final = New-SnakeOptimizerResult -Kind Ok -Detail "Office já removido; pode instalar de novo" -Title $title
         }
         elseif ($result.Done.Count -eq 0) {
             Write-SnakeOptimizerStatus -Type Info -Message "Não havia nada do Office para remover."

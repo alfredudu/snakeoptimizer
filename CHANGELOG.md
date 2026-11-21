@@ -1,5 +1,10 @@
 # Histórico de mudanças do SnakeOptimizer
 
+## 1.8.1 — 21/11/2026
+
+- Remover o Office por completo: no registro (`HKLM\...\Office`, inclusive `WOW6432Node`), os **suplementos de outros programas** (Teams no Outlook, Adobe Acrobat, antivírus) agora ficam, para continuarem funcionando no Office novo. O resto sai, como antes.
+- Uma chave que o Windows não deixa apagar vira "sobra sem efeito na reinstalação", sem "concluído com ressalvas" e sem pedir reinício. Se o Office já não está no PC, a tela diz que pode instalar de novo.
+
 ## 1.8 — 21/11/2026
 
 - **Aviso de memória no ícone da bandeja**: com a RAM acima de 90% em 3 leituras seguidas (uns 5 minutos), um balão diz quanto está em uso e qual programa mais ocupa. O clique abre "Liberar memória". Repete no máximo a cada 2 horas; um pico passageiro não avisa.
