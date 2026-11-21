@@ -1,7 +1,7 @@
 ﻿# Núcleo: ambiente, sessão, registro, log, formatação e execução de programas nativos.
 # Nada aqui desenha cabeçalhos ou faz perguntas; isso fica em Console.psm1.
 
-$script:SnakeOptimizerBuild = "1.9.4"
+$script:SnakeOptimizerBuild = "1.9.5"
 
 # A trava dos arquivos de estado (Invoke-SnakeOptimizerStateLock): uma por sessão do Windows.
 $script:SnakeOptimizerStateLockName = "Local\SnakeOptimizer.State"
@@ -1748,13 +1748,53 @@ function Test-SnakeOptimizerEchoLine {
 }
 
 
+function Select-SnakeOptimizerLegacyEncoding {
+    <#
+    Entre as duas páginas antigas do Windows, a que o programa usou: o DISM escreve na OEM (850 no Brasil) e o CHKDSK na
+    ANSI (1252). Lidos na página errada, os acentos viram outros símbolos ("Estágio" vira "Estßgio", "concluídos" vira
+    "concluÝdos"). Decodifica o trecho nas duas e fica com a que tem mais letras acentuadas do português e menos símbolos
+    soltos; no empate, a OEM.
+    #>
+    param (
+        [Parameter(Mandatory)][byte[]]$Buffer,
+        [int]$Offset = 0,
+        [int]$Count = -1
+    )
+
+    if ($Count -lt 0) { $Count = $Buffer.Length - $Offset }
+
+    $oem = [System.Text.Encoding]::GetEncoding([System.Globalization.CultureInfo]::CurrentCulture.TextInfo.OEMCodePage)
+    $ansi = [System.Text.Encoding]::GetEncoding([System.Globalization.CultureInfo]::CurrentCulture.TextInfo.ANSICodePage)
+
+    if ($oem.CodePage -eq $ansi.CodePage) { return $oem }
+
+    $letters = "áàâãéêíóôõúüçÁÀÂÃÉÊÍÓÔÕÚÜÇñÑ"
+    $score = {
+        param ($text)
+        $value = 0
+        foreach ($char in $text.ToCharArray()) {
+            if ([int]$char -lt 0x80) { continue }
+            if ($letters.IndexOf($char) -ge 0) { $value += 2 } else { $value -= 1 }
+        }
+        $value
+    }
+
+    $oemScore = & $score ($oem.GetString($Buffer, $Offset, $Count))
+    $ansiScore = & $score ($ansi.GetString($Buffer, $Offset, $Count))
+
+    if ($ansiScore -gt $oemScore) { return $ansi }
+    return $oem
+}
+
+
 function Read-SnakeOptimizerProcessLines {
     <#
     Executa um programa nativo e devolve a saída linha a linha, enquanto ela chega, terminando uma linha tanto no "\n"
     quanto no "\r" sozinho. O pipe do PowerShell (& programa | ForEach-Object) só entrega uma linha no "\n": o SFC, que
     reescreve "Verificação 9% concluída." no mesmo lugar com "\r", ficava sem nada na tela por 20 minutos e soltava
-    tudo de uma vez no fim. A codificação vem dos primeiros bytes: UTF-16 (o SFC gravando num pipe) ou a do console
-    (DISM, CHKDSK e os demais). O que sai no stderr vem depois, ao terminar. Deixa o código de saída em $LASTEXITCODE.
+    tudo de uma vez no fim. A codificação vem dos primeiros bytes: UTF-16 (o SFC gravando num pipe), UTF-8 (winget), a
+    OEM (DISM) ou a ANSI (CHKDSK), escolhida por Select-SnakeOptimizerLegacyEncoding. O que sai no stderr vem depois, ao
+    terminar, decodificado do mesmo jeito. Deixa o código de saída em $LASTEXITCODE.
     #>
     param (
         [Parameter(Mandatory)]
@@ -1780,7 +1820,9 @@ function Read-SnakeOptimizerProcessLines {
 
     try {
         # O stderr é lido em paralelo: um programa que enche esse pipe sem ninguém ler ficaria parado.
-        $errorText = $process.StandardError.ReadToEndAsync()
+        # Em bytes, para decodificar como a saída normal (UTF-8, OEM ou ANSI), e não na página padrão do .NET.
+        $errorBytes = New-Object System.IO.MemoryStream
+        $errorCopy = $process.StandardError.BaseStream.CopyToAsync($errorBytes)
         $stream = $process.StandardOutput.BaseStream
         $buffer = New-Object byte[] 4096
         $chars = New-Object char[] 8192
@@ -1818,7 +1860,7 @@ function Read-SnakeOptimizerProcessLines {
                         $decoder = [System.Text.Encoding]::UTF8.GetDecoder()
                     }
                     catch {
-                        $decoder = [System.Text.Encoding]::GetEncoding([System.Globalization.CultureInfo]::CurrentCulture.TextInfo.OEMCodePage).GetDecoder()
+                        $decoder = (Select-SnakeOptimizerLegacyEncoding -Buffer $buffer -Offset $offset -Count ($count - $offset)).GetDecoder()
                     }
                 }
             }
@@ -1853,7 +1895,22 @@ function Read-SnakeOptimizerProcessLines {
 
         $process.WaitForExit()
 
-        foreach ($errorLine in ([string]$errorText.Result -split "\r?\n")) {
+        [void]$errorCopy.Wait()
+        $raw = $errorBytes.ToArray()
+        $errorText = ""
+
+        if ($raw.Length -gt 0) {
+            $zeros = 0
+            for ($i = 1; $i -lt $raw.Length; $i += 2) { if ($raw[$i] -eq 0) { $zeros++ } }
+
+            if ($raw.Length -ge 2 -and $zeros -ge [Math]::Floor($raw.Length / 4)) { $errorText = [System.Text.Encoding]::Unicode.GetString($raw) }
+            else {
+                try { $errorText = (New-Object System.Text.UTF8Encoding ($false, $true)).GetString($raw) }
+                catch { $errorText = (Select-SnakeOptimizerLegacyEncoding -Buffer $raw).GetString($raw) }
+            }
+        }
+
+        foreach ($errorLine in ($errorText.TrimStart([char]0xFEFF) -split "\r?\n")) {
             if ($errorLine.Length -gt 0) { $errorLine }
         }
 

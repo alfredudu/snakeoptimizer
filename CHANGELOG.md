@@ -1,5 +1,9 @@
 # Histórico de mudanças do SnakeOptimizer
 
+## 1.9.5 — 21/11/2026
+
+- **Detalhes técnicos:** acentos certos na saída do CHKDSK ("Estágio", "concluídos", "Verificação de índices"). O CHKDSK escreve numa codificação diferente da do DISM, e a leitura usava a do DISM para os dois; agora ela reconhece qual o programa usou. As mensagens de erro dos programas passam pela mesma leitura.
+
 ## 1.9.4 — 21/11/2026
 
 - **Limpar perfis de usuário** (Limpeza > Avançado): lista as pastas de `C:\Users` com o tamanho, a conta e o último uso, todas desmarcadas. O seu perfil e o de quem está conectado ficam de fora. Os marcados saem por inteiro, primeiro pelo próprio Windows (que também tira o perfil do registro); o que sobrar sai pelo desbloqueio abaixo. A conta em si não é apagada.
