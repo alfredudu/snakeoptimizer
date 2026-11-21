@@ -3257,6 +3257,77 @@ function Get-SnakeOptimizerShadowUsedBytes {
 }
 
 
+function Get-SnakeOptimizerProcessTreeCpu {
+    # Tempo de processador (segundos) de um processo e de tudo o que ele abriu (a Limpeza de Disco passa trabalho para o
+    # dismhost.exe). Devolve também os Ids, para encerrar a árvore inteira.
+    param ([Parameter(Mandatory)][int]$ProcessId)
+
+    $all = @(Get-CimInstance -ClassName Win32_Process -Property ProcessId, ParentProcessId, KernelModeTime, UserModeTime -ErrorAction SilentlyContinue)
+    $ids = New-Object System.Collections.Generic.List[int]
+    $ids.Add($ProcessId)
+    $cpu = [double]0
+
+    for ($i = 0; $i -lt $ids.Count; $i++) {
+        foreach ($row in $all) {
+            if ([int]$row.ProcessId -eq $ids[$i]) { $cpu += ([double]$row.KernelModeTime + [double]$row.UserModeTime) / 1e7 }
+            elseif ([int]$row.ParentProcessId -eq $ids[$i] -and -not $ids.Contains([int]$row.ProcessId)) { $ids.Add([int]$row.ProcessId) }
+        }
+    }
+
+    return [PSCustomObject]@{ Cpu = $cpu; Ids = @($ids) }
+}
+
+
+function Wait-SnakeOptimizerCleanmgr {
+    <#
+    Espera a Limpeza de Disco do Windows terminar, mostrando há quanto tempo ela trabalha. Ela pode levar muitos minutos
+    (apagar um Windows.old grande), mas às vezes fica aberta sem fazer nada, esperando um disco que não responde ou uma
+    janela escondida: parada por 10 minutos (o processo e os que ele abriu sem usar o processador), ela é encerrada e a
+    limpeza segue sem ela. Limite geral de 2 horas. Devolve $true quando ela terminou sozinha.
+    #>
+    param ([Parameter(Mandatory)][System.Diagnostics.Process]$Process)
+
+    $activity = "Limpeza de Disco do Windows"
+    $started = [System.Diagnostics.Stopwatch]::StartNew()
+    $lastCpu = [double]-1
+    $idleSince = [System.Diagnostics.Stopwatch]::StartNew()
+    $tree = $null
+
+    try {
+        while (-not $Process.WaitForExit(3000)) {
+            $minutes = [int][Math]::Floor($started.Elapsed.TotalMinutes)
+            $tree = Get-SnakeOptimizerProcessTreeCpu -ProcessId $Process.Id
+
+            if ($tree.Cpu -gt $lastCpu + 0.5) {
+                $lastCpu = $tree.Cpu
+                $idleSince.Restart()
+            }
+
+            $elapsed = $(if ($minutes -lt 1) { "menos de 1 minuto" } elseif ($minutes -eq 1) { "1 minuto" } else { "$minutes minutos" })
+            Write-Progress -Activity $activity -Status "Trabalhando há $elapsed (apagar o Windows anterior pode levar vários minutos)"
+
+            $stalled = ($idleSince.Elapsed.TotalMinutes -ge 10)
+            $tooLong = ($started.Elapsed.TotalHours -ge 2)
+            if (-not ($stalled -or $tooLong)) { continue }
+
+            $reason = $(if ($stalled) { "ficou 10 minutos parada, sem trabalhar" } else { "passou de 2 horas" })
+            Write-SnakeOptimizerStatus -Type Warning -Message "A Limpeza de Disco do Windows $reason e foi encerrada; o SnakeOptimizer apaga o que sobrou direto."
+
+            foreach ($id in @($tree.Ids)) {
+                try { Stop-Process -Id $id -Force -ErrorAction Stop } catch { }
+            }
+
+            return $false
+        }
+
+        return $true
+    }
+    finally {
+        Write-Progress -Activity $activity -Completed
+    }
+}
+
+
 function Invoke-SnakeOptimizerCleanmgrHandlers {
     <#
     A Limpeza de Disco do próprio Windows (cleanmgr /sagerun), só com os itens pedidos: é ela que sabe apagar o Windows
@@ -3282,10 +3353,7 @@ function Invoke-SnakeOptimizerCleanmgrHandlers {
     try {
         Write-SnakeOptimizerStatus -Type Info -Message "A Limpeza de Disco do Windows está trabalhando; a janelinha dela fecha sozinha."
         $process = Start-Process -FilePath (Join-Path $env:WINDIR "System32\cleanmgr.exe") -ArgumentList "/sagerun:$($script:SnakeOptimizerCleanmgrSlot)" -PassThru -WindowStyle Minimized
-
-        if (-not $process.WaitForExit(2 * 60 * 60 * 1000)) {
-            Write-SnakeOptimizerStatus -Type Warning -Message "A Limpeza de Disco do Windows passou de 2 horas e foi deixada terminando sozinha."
-        }
+        [void](Wait-SnakeOptimizerCleanmgr -Process $process)
     }
     finally {
         foreach ($key in $marked) { Remove-ItemProperty -LiteralPath $key -Name $flag -ErrorAction SilentlyContinue }

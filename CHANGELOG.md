@@ -1,5 +1,9 @@
 # Histórico de mudanças do SnakeOptimizer
 
+## 1.9.15 — 21/11/2026
+
+- **Limpeza avançada > Instalações anteriores do Windows:** a espera pela Limpeza de Disco do Windows ficava muda (até 2 horas) e parecia travada depois que a janelinha dela fechava. Agora a barra mostra há quantos minutos ela trabalha, e se ela ficar 10 minutos parada, sem usar o processador (esperando um disco que não responde, por exemplo), é encerrada e o SnakeOptimizer apaga o que sobrou direto.
+
 ## 1.9.14 — 21/11/2026
 
 - **Minimizar vai para a bandeja:** minimizada, a janela sai da barra de tarefas e vira um ícone perto do relógio (um aviso explica isso na primeira vez). Um clique no ícone traz a janela de volta; o botão direito tem **Abrir** e **Fechar**. Uma ação em andamento continua rodando escondida, e se ela precisar de uma resposta o aviso sai do ícone.
