@@ -1,5 +1,10 @@
 # Histórico de mudanças do SnakeOptimizer
 
+## 1.9.14 — 21/11/2026
+
+- **Minimizar vai para a bandeja:** minimizada, a janela sai da barra de tarefas e vira um ícone perto do relógio (um aviso explica isso na primeira vez). Um clique no ícone traz a janela de volta; o botão direito tem **Abrir** e **Fechar**. Uma ação em andamento continua rodando escondida, e se ela precisar de uma resposta o aviso sai do ícone.
+- **Monitor da bandeja volta sozinho:** ligado mas fechado (uma atualização o encerrou, ele caiu), o monitor só voltava no próximo logon. Agora a janela do SnakeOptimizer o reabre alguns segundos depois de abrir.
+
 ## 1.9.13 — 21/11/2026
 
 - **Saúde dos SSDs NVMe em %:** a Saúde dos discos e o Inventário completo leem o registro de saúde do próprio SSD (o mesmo que o Hard Disk Sentinel e o CrystalDiskInfo usam), em vez de só o resumo do Windows, que costuma vir com o desgaste em 0% e sem horas. Novas linhas: **Saúde** (100% menos a vida útil usada, limitada pela reserva de blocos), **Reserva do SSD**, **Total gravado**, **Ligações**, **Desligamentos bruscos** e **Erros de mídia**, além das horas ligado e da temperatura do próprio disco. Alertas novos: aviso crítico do SSD, reserva no limite e erros de mídia. Exige Administrador.

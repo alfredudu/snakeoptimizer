@@ -1,7 +1,7 @@
 ﻿# Núcleo: ambiente, sessão, registro, log, formatação e execução de programas nativos.
 # Nada aqui desenha cabeçalhos ou faz perguntas; isso fica em Console.psm1.
 
-$script:SnakeOptimizerBuild = "1.9.13"
+$script:SnakeOptimizerBuild = "1.9.14"
 
 # A trava dos arquivos de estado (Invoke-SnakeOptimizerStateLock): uma por sessão do Windows.
 $script:SnakeOptimizerStateLockName = "Local\SnakeOptimizer.State"

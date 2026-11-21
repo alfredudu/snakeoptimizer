@@ -1086,7 +1086,117 @@ function Set-GuiTaskbarFlash {
     catch {
         # Cosmético.
     }
+
+    # Escondida na bandeja, a janela não tem botão para piscar: o aviso sai do ícone perto do relógio.
+    if ($On -and (Test-GuiInTray)) {
+        Show-GuiTrayBalloon -Text "O SnakeOptimizer precisa da sua resposta. Clique aqui para voltar à janela." -Icon Warning
+    }
 }
+
+
+# ---------------------------------------------------------------------------
+# Bandeja: minimizada, a janela sai da barra de tarefas e vira um ícone perto do relógio; um clique traz de volta.
+# A ação em andamento continua rodando escondida. Este ícone é da janela; o do monitor (SnakeOptimizer.Agent.ps1) é
+# outro, e fica sempre lá.
+# ---------------------------------------------------------------------------
+
+$script:TrayIcon = $null
+$script:TrayHintShown = $false
+$script:StateBeforeTray = "Normal"
+
+function Get-GuiTrayIcon {
+    if ($null -ne $script:TrayIcon) { return $script:TrayIcon }
+
+    Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+    $tray = New-Object System.Windows.Forms.NotifyIcon
+    $tray.Text = "SnakeOptimizer (clique para abrir)"
+
+    try {
+        $iconPath = Get-SnakeOptimizerIconPath
+        $tray.Icon = $(if ($iconPath -and (Test-Path -LiteralPath $iconPath)) { New-Object System.Drawing.Icon($iconPath) } else { [System.Drawing.SystemIcons]::Application })
+    }
+    catch {
+        $tray.Icon = [System.Drawing.SystemIcons]::Application
+    }
+
+    $menu = New-Object System.Windows.Forms.ContextMenuStrip
+    $open = $menu.Items.Add("Abrir o SnakeOptimizer")
+    $open.Font = New-Object System.Drawing.Font($open.Font, [System.Drawing.FontStyle]::Bold)
+    $open.Add_Click({ Show-GuiFromTray })
+    [void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
+    $quit = $menu.Items.Add("Fechar o SnakeOptimizer")
+    $quit.Add_Click({ Show-GuiFromTray; $window.Close() })
+    $tray.ContextMenuStrip = $menu
+
+    $tray.Add_MouseClick({
+        param ($sender, $eventArgs)
+        if ($eventArgs.Button -eq [System.Windows.Forms.MouseButtons]::Left) { Show-GuiFromTray }
+    })
+    $tray.Add_BalloonTipClicked({ Show-GuiFromTray })
+
+    $script:TrayIcon = $tray
+    return $tray
+}
+
+
+function Test-GuiInTray {
+    return ($null -ne $script:TrayIcon -and $script:TrayIcon.Visible -and -not $window.IsVisible)
+}
+
+
+function Show-GuiTrayBalloon {
+    param (
+        [Parameter(Mandatory)][string]$Text,
+        [ValidateSet("Info", "Warning", "Error", "None")][string]$Icon = "Info"
+    )
+
+    try { (Get-GuiTrayIcon).ShowBalloonTip(6000, "SnakeOptimizer", $Text, [System.Windows.Forms.ToolTipIcon]::$Icon) } catch { }
+}
+
+
+function Hide-GuiToTray {
+    try {
+        $tray = Get-GuiTrayIcon
+        $tray.Visible = $true
+        $window.Hide()
+
+        # Só da primeira vez: quem minimiza sempre já sabe onde a janela foi parar.
+        if (-not $script:TrayHintShown) {
+            $script:TrayHintShown = $true
+            $text = $(if ($script:Running) { "Continua trabalhando aqui na bandeja. Clique no ícone para voltar à janela." } else { "O SnakeOptimizer continua aberto aqui na bandeja. Clique no ícone para voltar." })
+            Show-GuiTrayBalloon -Text $text
+        }
+    }
+    catch {
+        # Sem a bandeja, a janela fica só minimizada, como antes.
+        try { $window.Show() } catch { }
+    }
+}
+
+
+function Show-GuiFromTray {
+    try {
+        if (-not $window.IsVisible) { $window.Show() }
+        $window.WindowState = $(if ($script:StateBeforeTray -eq "Maximized") { "Maximized" } else { "Normal" })
+        [void]$window.Activate()
+        $window.Topmost = $true
+        $window.Topmost = $false
+    }
+    finally {
+        if ($null -ne $script:TrayIcon) { $script:TrayIcon.Visible = $false }
+    }
+}
+
+
+$window.Add_StateChanged({
+    if ($window.WindowState -eq "Minimized") {
+        # Logo depois, e não dentro do próprio evento: a janela termina de minimizar antes de sumir.
+        if ($window.IsVisible) { [void]$window.Dispatcher.BeginInvoke([System.Windows.Threading.DispatcherPriority]::Background, [Action]{ if ($window.WindowState -eq "Minimized" -and $window.IsVisible) { Hide-GuiToTray } }) }
+    }
+    else {
+        $script:StateBeforeTray = [string]$window.WindowState
+    }
+})
 
 $window.Add_SourceInitialized({
     Set-GuiTitleBarTheme -Target $window
@@ -5360,6 +5470,13 @@ $window.Add_Closing({
     $script:HomeReaderTimer.Stop()
     $script:HomeStampTimer.Stop()
     Set-GuiTaskbarProgress -State None
+    $script:MonitorCheckTimer.Stop()
+
+    # O ícone da bandeja sai junto (senão ele fica lá até o mouse passar por cima).
+    if ($null -ne $script:TrayIcon) {
+        try { $script:TrayIcon.Visible = $false; $script:TrayIcon.Dispose() } catch { }
+        $script:TrayIcon = $null
+    }
 
     foreach ($reader in @($script:HomeReader, $script:WarmupReader)) {
         if ($null -ne $reader) { Close-SnakeOptimizerGuiReader -Reader $reader }
@@ -5469,6 +5586,7 @@ $script:RequestTimer.Add_Tick({
         $request = Receive-SnakeOptimizerWindowRequest
         if ($null -eq $request) { return }
 
+        if (-not $window.IsVisible) { Show-GuiFromTray }
         if ($window.WindowState -eq "Minimized") { $window.WindowState = "Normal" }
         [void]$window.Activate()
         $window.Topmost = $true
@@ -5487,11 +5605,21 @@ $script:RequestTimer.Add_Tick({
     }
 })
 
+# O monitor da bandeja ligado mas fechado (uma atualização o fechou, ele caiu, alguém o encerrou): a janela o reabre
+# alguns segundos depois de abrir. Antes, ele só voltava no próximo logon.
+$script:MonitorCheckTimer = New-Object System.Windows.Threading.DispatcherTimer
+$script:MonitorCheckTimer.Interval = [TimeSpan]::FromSeconds(5)
+$script:MonitorCheckTimer.Add_Tick({
+    $script:MonitorCheckTimer.Stop()
+    try { [void](Restore-SnakeOptimizerAgentIfMissing) } catch { }
+})
+
 $window.Add_ContentRendered({
     $script:WarmupTimer.Start()
     $script:SearchWarmTimer.Start()
     $script:RequestTimer.Start()
     $script:HomeStampTimer.Start()
+    $script:MonitorCheckTimer.Start()
 
     if ($script:StartAction) { $script:StartActionTimer.Start() }
 })
@@ -5508,4 +5636,9 @@ Limit-GuiWindowToWorkArea
 Reset-GuiOutput
 $script:AntivirusMode = Get-GuiSavedAntivirusMode
 Show-GuiPage -Id $script:StartPage
-[void]$window.ShowDialog()
+
+# Show + Dispatcher.Run, e não ShowDialog: com ShowDialog, esconder a janela (minimizar para a bandeja) encerraria o
+# diálogo e, com ele, o SnakeOptimizer. Assim a janela some e volta à vontade; o laço só termina quando ela fecha.
+$window.Add_Closed({ $window.Dispatcher.InvokeShutdown() })
+$window.Show()
+[System.Windows.Threading.Dispatcher]::Run()

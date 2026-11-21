@@ -132,14 +132,9 @@ function Test-SnakeOptimizerAgentStartBlocked {
 }
 
 
-function Start-SnakeOptimizerAgent {
-    <#
-    Abre o monitor agora (o próprio script recusa uma segunda cópia) e devolve se ele apareceu em alguns segundos. O monitor
-    nunca roda como Administrador: aberto direto da janela elevada, ele herdaria a elevação até o fim da sessão (e o "Abrir
-    o SnakeOptimizer" do menu abriria a janela elevada sem perguntar). Por isso, da janela elevada, ele abre por um atalho
-    (monitor.lnk, na pasta de dados) entregue ao Explorador, que o abre na sessão da pessoa, sem elevação. Quem chama
-    confere Test-SnakeOptimizerAgentStartBlocked. Uma falha ao pedir a abertura vira um erro em português.
-    #>
+function Request-SnakeOptimizerAgentStart {
+    # Só pede a abertura do monitor (sem esperar ele aparecer): da janela elevada, pelo atalho entregue ao Explorador, que
+    # o abre sem elevação. Uma falha vira um erro em português.
     $agentHost = Get-SnakeOptimizerAgentHost
     $arguments = "$($agentHost.Prefix)-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File $(ConvertTo-SnakeOptimizerCommandLineArgument -Value (Get-SnakeOptimizerAgentScriptPath))"
 
@@ -156,6 +151,38 @@ function Start-SnakeOptimizerAgent {
     catch {
         throw "o Windows não deixou abrir o monitor agora"
     }
+}
+
+
+function Restore-SnakeOptimizerAgentIfMissing {
+    <#
+    Chamado quando a janela abre: se o monitor está ligado para esta conta mas não está rodando (fechou numa atualização,
+    caiu, foi encerrado no Gerenciador de Tarefas), abre de novo, sem esperar. Antes, ele só voltava no próximo logon.
+    Devolve se pediu a abertura.
+    #>
+    try {
+        if (-not (Test-SnakeOptimizerAgentEnabled)) { return $false }
+        if (Test-SnakeOptimizerAgentStartBlocked) { return $false }
+        if (@(Get-SnakeOptimizerAgentProcesses).Count -gt 0) { return $false }
+        Request-SnakeOptimizerAgentStart
+        return $true
+    }
+    catch {
+        Write-Verbose "Monitor: $($_.Exception.Message)"
+        return $false
+    }
+}
+
+
+function Start-SnakeOptimizerAgent {
+    <#
+    Abre o monitor agora (o próprio script recusa uma segunda cópia) e devolve se ele apareceu em alguns segundos. O monitor
+    nunca roda como Administrador: aberto direto da janela elevada, ele herdaria a elevação até o fim da sessão (e o "Abrir
+    o SnakeOptimizer" do menu abriria a janela elevada sem perguntar). Por isso, da janela elevada, ele abre por um atalho
+    (monitor.lnk, na pasta de dados) entregue ao Explorador, que o abre na sessão da pessoa, sem elevação. Quem chama
+    confere Test-SnakeOptimizerAgentStartBlocked. Uma falha ao pedir a abertura vira um erro em português.
+    #>
+    Request-SnakeOptimizerAgentStart
 
     # O Explorador abre o atalho por conta própria, um instante depois: confere por alguns segundos se o monitor apareceu e
     # continuou aberto por 2 segundos. Um monitor que abriu elevado (o Explorador não fez a troca) fecha sozinho logo no
