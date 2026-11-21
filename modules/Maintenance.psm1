@@ -169,6 +169,8 @@ function Get-SnakeOptimizerMaintenancePlanItems {
             -Description "as atualizações e os drivers opcionais; as prévias e uma versão nova do Windows ficam de fora"),
         (New-SnakeOptimizerPlanItem -Id "drivers" -Phase Auto -Title "Detectar dispositivos novos" `
             -Description "procura hardware sem driver; não atualiza drivers (isso é na etapa do Windows Update)"),
+        (New-SnakeOptimizerPlanItem -Id "vendor-drivers" -Phase Auto -Title "Atualizar drivers pelo fabricante" `
+            -Description "com o Dell Command | Update, quando instalado; sem ele, a etapa é pulada"),
         (New-SnakeOptimizerPlanItem -Id "winget" -Phase Auto -Title "Atualizar programas (winget)" `
             -Description "você escolhe o que atualizar antes da parte automática"),
         (New-SnakeOptimizerPlanItem -Id "browsers" -Phase Auto -Title "Atualizar os navegadores" `
@@ -719,6 +721,7 @@ function Invoke-SnakeOptimizerMaintenanceStepAction {
         "early-updates" { Disable-SnakeOptimizerEarlyUpdates -Embedded -PassThru }
         "windows-update" { Install-SnakeOptimizerPendingUpdates -Embedded -PassThru }
         "drivers"       { Invoke-SnakeOptimizerDeviceScan -Embedded -PassThru }
+        "vendor-drivers" { Update-SnakeOptimizerVendorDrivers -Embedded -PassThru }
         "winget" {
             Enter-SnakeOptimizerAction -Title "Atualizar programas (winget)" -Embedded
 

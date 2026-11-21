@@ -283,6 +283,90 @@ function Get-SnakeOptimizerVendorToolCatalog {
 }
 
 
+function Get-SnakeOptimizerDellCommandUpdateCli {
+    # O modo de linha de comando do Dell Command | Update (dcu-cli.exe), ou vazio quando não está instalado.
+    foreach ($root in @($env:ProgramFiles, ${env:ProgramFiles(x86)})) {
+        if ([string]::IsNullOrWhiteSpace($root)) { continue }
+        $path = Join-Path $root "Dell\CommandUpdate\dcu-cli.exe"
+        if (Test-Path -LiteralPath $path -PathType Leaf) { return $path }
+    }
+
+    return ""
+}
+
+
+function Update-SnakeOptimizerVendorDrivers {
+    <#
+    A etapa "Drivers do fabricante" do Otimizar. Só a Dell tem uma ferramenta que instala sem janela e diz o resultado
+    (dcu-cli.exe, do Dell Command | Update): com ela instalada, roda e instala o que houver, sem reiniciar. Sem ela (outro
+    fabricante, linha pessoal da Dell, que usa o SupportAssist, ou a ferramenta não instalada), a etapa é pulada com o nome
+    da ferramenta certa para o PC: nunca é um erro. SupportAssist, Lenovo Vantage, NVIDIA App e Intel DSA não têm modo
+    automático confiável; ficam na tela Drivers.
+    #>
+    param (
+        [switch]$Embedded,
+        [switch]$PassThru
+    )
+
+    $title = "Atualizar drivers pelo fabricante"
+    $cli = ""
+    try { $cli = Get-SnakeOptimizerDellCommandUpdateCli } catch { $cli = "" }
+
+    if (-not $cli) {
+        Enter-SnakeOptimizerAction -Title $title -Embedded:$Embedded
+
+        $tool = $null
+        try { $tool = @(Get-SnakeOptimizerVendorTools -Hardware (Get-SnakeOptimizerHardwareVendors)) | Select-Object -First 1 } catch { $tool = $null }
+
+        if ($null -ne $tool -and $tool.Id -eq "dell") {
+            $message = "O Dell Command | Update não está instalado; a etapa foi pulada. Ele pode ser instalado em Atualizações > Ferramentas do fabricante."
+            $detail = "Dell Command | Update não instalado"
+        }
+        elseif ($null -ne $tool) {
+            $message = "A ferramenta deste PC ($($tool.Name)) não tem modo automático; a etapa foi pulada. Use-a em Atualizações > Ferramentas do fabricante."
+            $detail = "sem ferramenta automática para este PC"
+        }
+        else {
+            $message = "Nenhuma ferramenta de drivers do fabricante para rodar sozinha; a etapa foi pulada."
+            $detail = "sem ferramenta automática para este PC"
+        }
+
+        Write-SnakeOptimizerStatus -Type Info -Message $message
+        $final = New-SnakeOptimizerResult -Kind Skipped -Detail $detail -Title $title
+
+        if ($PassThru) { $final }
+        Exit-SnakeOptimizerAction -Embedded:$Embedded -Result $final
+        return
+    }
+
+    # Códigos de saída do dcu-cli (documentação da Dell): 0 instalou, 1 instalou e pede reinício, 5 há um reinício
+    # anterior pendente, 6 já está rodando, 7 modelo não atendido, 500 nada novo.
+    $parser = {
+        param ($ExitCode, $Text, $StartedAt, $Embedded)
+
+        switch ([int]$ExitCode) {
+            0 { New-SnakeOptimizerResult -Kind Ok -Detail "drivers e firmware da Dell atualizados" }
+            1 { New-SnakeOptimizerResult -Kind Warning -Detail "atualizado; termina de instalar quando o PC reiniciar" -Data @{ RebootRequired = $true } }
+            5 { New-SnakeOptimizerResult -Kind Skipped -Detail "o Dell Command | Update espera um reinício de uma instalação anterior" -Data @{ RebootRequired = $true } }
+            6 { New-SnakeOptimizerResult -Kind Skipped -Detail "o Dell Command | Update já estava rodando" }
+            7 { New-SnakeOptimizerResult -Kind Skipped -Detail "o Dell Command | Update não atende este modelo" }
+            500 { New-SnakeOptimizerResult -Kind Ok -Detail "nenhuma atualização da Dell para este PC" }
+            default { Get-SnakeOptimizerExitCodeResult -ExitCode $ExitCode -OutputText $Text }
+        }
+    }
+
+    Invoke-SnakeOptimizerTool `
+        -Title $title `
+        -FilePath $cli `
+        -Arguments @("/applyUpdates", "-reboot=disable") `
+        -Description @("Busca e instala os drivers, BIOS e firmware da Dell para este modelo, sem reiniciar. Pode levar de 5 a 20 minutos.") `
+        -Warnings @("Uma atualização de BIOS pode pedir para deixar o carregador ligado e reiniciar no fim.") `
+        -ResultParser $parser `
+        -Question "Atualizar os drivers da Dell agora?" `
+        -Embedded:$Embedded -PassThru:$PassThru
+}
+
+
 function Test-SnakeOptimizerVendorText {
     # Se um texto de fabricante ou modelo diz alguma coisa: placas genéricas vêm com "To Be Filled By O.E.M." e afins.
     param ([string]$Text)

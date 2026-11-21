@@ -14,6 +14,7 @@
         'AppUpdate',
         'Cleanup',
         'CleanupTools',
+        'UserProfiles',
         'Repair',
         'Software',
         'Network',

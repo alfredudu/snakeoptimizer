@@ -215,6 +215,12 @@ function Get-SnakeOptimizerNavigation {
         (New-SnakeOptimizerNavItem -Id "cleanup.advanced" -Label "Limpeza avançada" -Group "Avançado" -Admin -Accent `
             -Keywords "windows.old instalação anterior versão anterior drivers antigos driverstore pnputil lixeira órfã recycle.bin recycler dell supportassist remediation sarremediation hp swsetup lenovo swtools nvidia amd intel instaladores logs cbs dism teams onedrive miniaturas thumbcache pontos de restauração sombra vss patchcache installer cleanmgr limpeza de disco" `
             -Description "Windows anterior, drivers antigos, lixeiras órfãs, sobras da Dell e de outros fabricantes, logs, caches e pontos de restauração antigos" -Command "Invoke-SnakeOptimizerAdvancedCleanup"),
+        (New-SnakeOptimizerNavItem -Id "cleanup.profiles" -Label "Limpar perfis de usuário" -Group "Avançado" -Admin `
+            -Keywords "usuários perfis users c:\users contas antigas funcionários domínio pasta de usuário apagar perfil ntuser" `
+            -Description "Apaga as pastas de outros usuários em C:\Users, mesmo as que dizem sem permissão ou em uso" -Command "Invoke-SnakeOptimizerUserProfileCleanup"),
+        (New-SnakeOptimizerNavItem -Id "cleanup.unlock" -Label "Apagar arquivo ou pasta presa" -Group "Avançado" -Admin `
+            -Keywords "unlocker desbloquear em uso sem permissão acesso negado não consigo apagar arquivo preso pasta presa processo" `
+            -Description "Toma posse, fecha o programa que segura e, se ainda preso, apaga ao reiniciar" -Command "Invoke-SnakeOptimizerUnlockDelete"),
         (New-SnakeOptimizerNavItem -Id "cleanup.components" -Label "Limpar componentes do Windows (WinSxS)" -Group "Avançado" -Admin `
             -Keywords "winsxs dism component store atualizações antigas espaço" `
             -Description "Remove versões antigas de componentes substituídos por atualizações (DISM)" -Command "Invoke-SnakeOptimizerComponentCleanup"),

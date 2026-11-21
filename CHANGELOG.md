@@ -1,5 +1,11 @@
 # Histórico de mudanças do SnakeOptimizer
 
+## 1.9.4 — 21/11/2026
+
+- **Limpar perfis de usuário** (Limpeza > Avançado): lista as pastas de `C:\Users` com o tamanho, a conta e o último uso, todas desmarcadas. O seu perfil e o de quem está conectado ficam de fora. Os marcados saem por inteiro, primeiro pelo próprio Windows (que também tira o perfil do registro); o que sobrar sai pelo desbloqueio abaixo. A conta em si não é apagada.
+- **Apagar arquivo ou pasta presa** (Limpeza > Avançado), no estilo do Unlocker: cole o caminho e ele toma posse, apaga mesmo com caminho longo, pergunta ao Windows quais programas seguram o arquivo, fecha esses programas e apaga de novo. O que ainda estiver preso (um serviço, o antivírus) fica marcado para o Windows apagar ao reiniciar. Recusa a raiz do disco, a pasta do Windows e o seu perfil.
+- **Otimizar:** nova etapa **Atualizar drivers pelo fabricante**, com o Dell Command | Update quando ele está instalado (sem reiniciar). Sem ele, ou num PC de outro fabricante, a etapa é pulada com o nome da ferramenta certa; não é erro.
+
 ## 1.9.3 — 21/11/2026
 
 - **Detalhes técnicos:** caixa **Rolar até o fim** ao lado de Copiar, Salvar e Abrir log. Desmarcada, a saída fica parada onde você deixou enquanto a ação roda; marcada de novo, volta ao fim.
