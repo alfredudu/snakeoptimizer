@@ -1,5 +1,9 @@
 # Histórico de mudanças do SnakeOptimizer
 
+## 1.8.7 — 21/11/2026
+
+- A janela (canto da barra lateral), o relatório e o backup mostram a versão deste histórico ("Build 1.8.7"). Antes mostravam "Build 3.69", a numeração antiga da base do código.
+
 ## 1.8.6 — 21/11/2026
 
 - **Cartões que ficavam pulando de linha** (Início e outras páginas): com a janela perto do limite entre 3 e 4 colunas, a página alternava sozinha entre as duas. A largura era medida sem a barra de rolagem; quando a barra aparecia (por exemplo, no "Atualizando..." do Início), a área estreitava, a página mudava de colunas, a altura mudava, e o ciclo recomeçava. Agora a conta sempre reserva o espaço da barra, e o número de colunas só muda quando a janela muda de tamanho.
