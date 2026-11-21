@@ -511,75 +511,17 @@ function Get-SnakeOptimizerStartupChangeText {
 }
 
 
-function Read-SnakeOptimizerStartupSide {
-    <#
-    O jeito da tela Gerenciar inicialização: primeiro se é para desativar ou reativar, depois a lista daquele lado, com
-    nada marcado. Devolve as mudanças (Item e Enabled, o estado pedido) ou $null quando a pessoa desiste.
-    #>
-    param (
-        [object[]]$Enabled = @(),
-        [object[]]$Disabled = @(),
-        [bool]$IsAdmin = $true
-    )
-
-    $options = @()
-
-    if ($Enabled.Count -gt 0) {
-        $options += @{ Key = "D"; Label = "Desativar itens"; Description = "o que não precisa abrir com o Windows"; Accent = $true }
-    }
-
-    if ($Disabled.Count -gt 0) {
-        $options += @{ Key = "R"; Label = "Reativar itens"; Description = "o que foi desativado" }
-    }
-
-    $options += @{ Key = "X"; Label = "Cancelar"; Exit = $true }
-
-    $answer = Read-SnakeOptimizerChoice -Message "O que deseja fazer?" -Options $options -DefaultKey "X" -ShowMenu `
-        -TextPrompt "Opção (D, R ou X; ENTER = cancelar)"
-
-    $targetEnabled = $null
-    $pool = @()
-
-    if ($answer -ieq "D" -and $Enabled.Count -gt 0) {
-        $targetEnabled = $false
-        $pool = @($Enabled)
-    }
-    elseif ($answer -ieq "R" -and $Disabled.Count -gt 0) {
-        $targetEnabled = $true
-        $pool = @($Disabled)
-    }
-
-    if ($null -eq $targetEnabled) {
-        return $null
-    }
-
-    # Na hora de desativar, o que é do Windows, de hardware ou antivírus vem dito no próprio item: é o que faz falta.
-    $choices = @(
-        for ($i = 0; $i -lt $pool.Count; $i++) {
-            @{ Key = [string]$i; Label = $pool[$i].Name; Description = (Get-SnakeOptimizerStartupOptionText -Item $pool[$i] -IsAdmin $IsAdmin -Advice:(-not $targetEnabled)); Selected = $false }
-        }
-    )
-
-    $message = $(if ($targetEnabled) { "Marque os itens que devem voltar a abrir com o Windows" } else { "Marque os itens que NÃO devem mais abrir com o Windows" })
-    $picked = Read-SnakeOptimizerMultiSelect -Message $message -Options $choices
-
-    if ($null -eq $picked -or @($picked).Count -eq 0) {
-        return $null
-    }
-
-    return @(foreach ($key in @($picked)) { [PSCustomObject]@{ Item = $pool[[int]$key]; Enabled = $targetEnabled } })
-}
-
-
 function Read-SnakeOptimizerStartupReview {
     <#
-    A revisão do Otimizar: uma lista só, com o que abre hoje já marcado. Desmarcar desativa, marcar reativa. Antes de
-    mudar, a tela diz o que deixa de abrir e o que volta, e pergunta. Devolve as mudanças (Item e Enabled) ou $null
+    A lista da inicialização (na tela Gerenciar inicialização, -Standalone, e na revisão do Otimizar): uma lista só, com
+    o que abre hoje já marcado. Desmarcar desativa, marcar reativa. Antes de mudar, a tela diz o que deixa de abrir e o
+    que volta, e pergunta. Devolve as mudanças (Item e Enabled) ou $null
     quando nada muda (a lista cancelada, nenhuma diferença ou a pessoa disse não).
     #>
     param (
         [object[]]$Items = @(),
-        [bool]$IsAdmin = $true
+        [bool]$IsAdmin = $true,
+        [switch]$Standalone
     )
 
     $pool = @($Items)
@@ -600,8 +542,12 @@ function Read-SnakeOptimizerStartupReview {
     )
 
     # Sem "Marcar todos": reativaria de uma vez tudo o que a pessoa já tinha desativado. Desmarcar tudo é uma resposta
-    # (nada abre com o Windows): a lista volta vazia, e não $null.
-    $picked = Read-SnakeOptimizerMultiSelect -Message "O que deve abrir junto com o Windows" -Options $choices -NoSelectAll -AllowNone
+    # (nada abre com o Windows): a lista volta vazia, e não $null. Na tela avulsa os botões dizem Aplicar e Cancelar; no
+    # Otimizar, ficam os do fluxo (desistir pula a etapa).
+    $labels = @{}
+    if ($Standalone) { $labels = @{ ConfirmLabel = "Aplicar"; CancelLabel = "Cancelar" } }
+
+    $picked = Read-SnakeOptimizerMultiSelect -Message "O que deve abrir junto com o Windows" -Options $choices -NoSelectAll -AllowNone @labels
 
     if ($null -eq $picked) {
         return $null
@@ -626,8 +572,11 @@ function Read-SnakeOptimizerStartupReview {
     if ($on.Count -gt 0) { Write-SnakeOptimizerKeyValue -Label "Voltam a abrir" -Value (Join-SnakeOptimizerList -Items $on) }
     Write-Host ""
 
-    # Com algo deixando de abrir, a resposta padrão é Não: um número trocado no menu de texto não desativa a lista.
-    if (-not (Confirm-SnakeOptimizerAction "Aplicar estas mudanças na inicialização?" -DefaultKey $(if ($off.Count -gt 0) { "N" } else { "S" }))) {
+    # Com algo deixando de abrir, a resposta padrão no menu de texto é Não: um número trocado não desativa a lista. Na
+    # janela, as caixas marcadas já são a escolha, e o padrão é Sim.
+    $default = $(if ($off.Count -gt 0 -and -not (Test-SnakeOptimizerGuiPrompts)) { "N" } else { "S" })
+
+    if (-not (Confirm-SnakeOptimizerAction "Aplicar estas mudanças na inicialização?" -DefaultKey $default)) {
         return $null
     }
 
@@ -637,9 +586,9 @@ function Read-SnakeOptimizerStartupReview {
 
 function Set-SnakeOptimizerStartupItems {
     <#
-    Desativa ou reativa o que abre com o Windows. Sozinha, pergunta primeiro se é para desativar ou reativar e lista só
-    os itens daquele lado. Com -Review (a etapa do Otimizar), mostra uma lista só, com o que abre hoje já marcado: o que
-    for desmarcado deixa de abrir, e o que for marcado volta a abrir.
+    Desativa ou reativa o que abre com o Windows: uma lista só, com o que abre hoje já marcado. O que for desmarcado
+    deixa de abrir, e o que for marcado volta a abrir. Sozinha, os botões dizem Aplicar e Cancelar; com -Review (a etapa
+    do Otimizar), ficam os do fluxo.
     #>
     param (
         [switch]$Review
@@ -715,23 +664,14 @@ function Set-SnakeOptimizerStartupItems {
         Write-SnakeOptimizerKeyValue -Label "Desativados" -Value $disabled.Count
         Write-Host ""
 
-        if ($Review) {
-            $changes = Read-SnakeOptimizerStartupReview -Items $items -IsAdmin $isAdmin
+        # Uma lista só, com tudo o que abre (ou abria) com o Windows: marcado abre, desmarcado não. Aplicar muda só o
+        # que mudou de marca.
+        $changes = Read-SnakeOptimizerStartupReview -Items $items -IsAdmin $isAdmin -Standalone:(-not $Review)
 
-            if ($null -eq $changes) {
-                Write-SnakeOptimizerStatus -Type Info -Message "Nada foi mudado."
-                Exit-SnakeOptimizerAction -Result (New-SnakeOptimizerResult -Kind Skipped -Detail "você não mudou nada" -Title $title)
-                return
-            }
-        }
-        else {
-            $changes = Read-SnakeOptimizerStartupSide -Enabled $enabled -Disabled $disabled -IsAdmin $isAdmin
-
-            if ($null -eq $changes) {
-                Write-SnakeOptimizerStatus -Type Warning -Message "Operação cancelada."
-                Exit-SnakeOptimizerAction -Result (New-SnakeOptimizerResult -Kind Skipped -Detail "cancelado pelo usuário" -Title $title)
-                return
-            }
+        if ($null -eq $changes) {
+            Write-SnakeOptimizerStatus -Type Info -Message "Nada foi mudado."
+            Exit-SnakeOptimizerAction -Result (New-SnakeOptimizerResult -Kind Skipped -Detail "você não mudou nada" -Title $title)
+            return
         }
 
         $changed = 0

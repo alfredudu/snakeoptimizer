@@ -1,5 +1,9 @@
 # Histórico de mudanças do SnakeOptimizer
 
+## 1.8.4 — 21/11/2026
+
+- **Gerenciar inicialização** mostra direto a lista de tudo o que abre com o Windows, com caixas de marcar: o que abre hoje vem marcado. Desmarque o que não precisa abrir, marque o que quer de volta e clique em **Aplicar**. Antes, a tela perguntava primeiro "Desativar itens" ou "Reativar itens", e a lista só aparecia depois.
+
 ## 1.8.3 — 21/11/2026
 
 - **Sem janela preta do ícone da bandeja:** no Windows 11 com o Windows Terminal como terminal padrão, `-WindowStyle Hidden` não esconde o console, e o ícone abria com uma janela do PowerShell que ficava aberta (fechá-la derrubava o ícone). O ícone agora abre pelo `conhost.exe --headless`, que não cria janela, tanto pela tarefa da instalação quanto ao ligar o monitor na própria conta. O Atualizador troca a tarefa antiga e reabre o ícone sozinho.
