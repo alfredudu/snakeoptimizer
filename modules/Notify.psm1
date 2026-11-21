@@ -1100,8 +1100,22 @@ function Invoke-SnakeOptimizerTechnicianArea {
                         Write-SnakeOptimizerStatus -Type Success -Message "Configuração exportada em $path. Ela só abre com a senha técnica; mesmo assim, não deixe o arquivo no PC do cliente."
                     }
                     "7" {
-                        $path = (Read-SnakeOptimizerText -Message "Caminho do arquivo .snakemail (vazio = cancelar)").Trim('"')
-                        if ($path) {
+                        # A janela "Abrir" começa onde já houver um .snakemail (Área de Trabalho ou Downloads); senão, na
+                        # Área de Trabalho. Um pendrive é só navegar até ele.
+                        $desktop = [Environment]::GetFolderPath("Desktop")
+                        $downloads = Join-Path $env:USERPROFILE "Downloads"
+                        $found = @(foreach ($folder in @($desktop, $downloads)) { if ($folder -and (Test-Path -LiteralPath $folder)) { Get-ChildItem -LiteralPath $folder -Filter "*.snakemail" -File -ErrorAction SilentlyContinue } }) | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+                        $start = $(if ($found) { $found.DirectoryName } else { $desktop })
+
+                        Write-SnakeOptimizerStatus -Type Info -Message "Escolha o arquivo .snakemail na janela que abriu."
+                        $path = Read-SnakeOptimizerFilePath -Title "Importar a configuração de e-mail" -Folder $start -Filter "Configuração de e-mail do SnakeOptimizer (*.snakemail)|*.snakemail|Todos os arquivos (*.*)|*.*"
+
+                        if (-not $path) {
+                            Write-SnakeOptimizerStatus -Type Info -Message "Importação cancelada."
+                            $changed = $false
+                        }
+                        else {
+                            Write-SnakeOptimizerStatus -Type Info -Message "Arquivo: $path"
                             $imported = Import-SnakeOptimizerEmailConfig -Path $path -Password $password
                             Save-SnakeOptimizerEmailConfig -Config $imported
                             Write-SnakeOptimizerStatus -Type Success -Message "Configuração importada e envio ligado. Use Enviar um e-mail de teste para conferir."

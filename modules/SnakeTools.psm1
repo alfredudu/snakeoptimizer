@@ -1866,6 +1866,45 @@ function Get-SnakeOptimizerAutoPlanName {
 }
 
 
+function ConvertTo-SnakeOptimizerDayNames {
+    # Os dias de um gatilho semanal como nomes em inglês ("Sunday"...). O Agendador devolve DaysOfWeek como máscara de
+    # bits (1 = domingo, 2 = segunda ... 64 = sábado; 126 = segunda a sábado); aceita também nomes e DayOfWeek.
+    param ($Days)
+
+    $names = @("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")
+    $result = foreach ($day in @($Days)) {
+        if ($null -eq $day) { continue }
+        if ($day -is [DayOfWeek]) { [string]$day; continue }
+        $number = 0
+        if ([int]::TryParse([string]$day, [ref]$number)) {
+            for ($i = 0; $i -lt 7; $i++) { if ($number -band (1 -shl $i)) { $names[$i] } }
+        }
+        else { [string]$day }
+    }
+    return @($result | Select-Object -Unique)
+}
+
+
+function Get-SnakeOptimizerAutoCurrentPlan {
+    # Qual das três opções da tela está valendo: "1" (leve seg-sáb + completa dom), "2" (só a leve, todo dia), "3" (só a
+    # completa); "custom" quando há tarefa ligada de outro jeito (mudada no Agendador de Tarefas); "" quando desligada.
+    param ([object[]]$Status = @())
+
+    $light = @($Status | Where-Object { $_.Plan -eq "leve" } | Select-Object -First 1)
+    $full = @($Status | Where-Object { $_.Plan -eq "completa" } | Select-Object -First 1)
+    $lightOn = ($light.Count -gt 0 -and $light[0].Enabled)
+    $fullOn = ($full.Count -gt 0 -and $full[0].Enabled)
+    $lightDays = @(if ($lightOn) { ConvertTo-SnakeOptimizerDayNames -Days $light[0].Days })
+    $fullDays = @(if ($fullOn) { ConvertTo-SnakeOptimizerDayNames -Days $full[0].Days })
+
+    if (-not $lightOn -and -not $fullOn) { return "" }
+    if ($lightOn -and $fullOn -and $lightDays.Count -eq 6 -and $lightDays -notcontains "Sunday" -and $fullDays.Count -eq 1 -and $fullDays[0] -eq "Sunday") { return "1" }
+    if ($lightOn -and -not $fullOn -and $lightDays.Count -eq 7) { return "2" }
+    if ($fullOn -and -not $lightOn -and $fullDays.Count -eq 1 -and $fullDays[0] -eq "Sunday") { return "3" }
+    return "custom"
+}
+
+
 function Show-SnakeOptimizerAutoMaintenance {
     param ([switch]$PassThru)
 
@@ -1892,7 +1931,8 @@ function Show-SnakeOptimizerAutoMaintenance {
         $value = $(if (-not $item.Installed) { "desligada" }
             elseif (-not $item.Enabled) { "desativada no Agendador de Tarefas" }
             else {
-                $daysText = $(if (@($item.Days).Count -ge 7) { "todo dia" } else { (@($item.Days | ForEach-Object { $dayNames[[string]$_] }) -join ", ") })
+                $itemDays = @(ConvertTo-SnakeOptimizerDayNames -Days $item.Days)
+                $daysText = $(if ($itemDays.Count -ge 7) { "todo dia" } else { (@($itemDays | ForEach-Object { $dayNames[$_] }) -join ", ") })
                 "ligada ($daysText)$(if ($item.NextRun) { "; próxima: $(Format-SnakeOptimizerDateTime -When $item.NextRun)" })"
             })
         Write-SnakeOptimizerKeyValue -Label "Manutenção $($item.Label)" -Value $value -LabelWidth 22
@@ -1921,20 +1961,59 @@ function Show-SnakeOptimizerAutoMaintenance {
         Write-SnakeOptimizerStatus -Type Info -Message "Ainda não houve nenhuma execução automática neste PC."
     }
 
+    # O que está valendo agora, em palavras, e a resposta direta: está agendada ou não. Ligada, a tela deixa claro que
+    # não há nada a fazer (Manter como está é o botão principal) e as outras opções são trocas, não um "ligar de novo".
     Write-Host ""
-    $options = @(
-        @{ Key = "1"; Label = "Ligar: leve de segunda a sábado + completa no domingo"; Description = "Recomendado. Leve às 12h; completa no domingo às 12h (com o PC desligado, roda quando ligar)."; Accent = $true },
-        @{ Key = "2"; Label = "Ligar só a leve, todo dia"; Description = "Limpeza, DNS, atualizações e relatório todo dia às 12h." },
-        @{ Key = "3"; Label = "Ligar só a completa, uma vez por semana"; Description = "Domingo às 12h." },
-        @{ Key = "4"; Label = "Rodar a leve agora"; Description = "Para testar: roda em segundo plano e aparece aqui nas últimas execuções quando terminar." },
-        @{ Key = "5"; Label = "Desligar a manutenção automática"; Description = "Remove as tarefas. O histórico e os relatórios ficam." },
-        @{ Key = "X"; Label = "Voltar"; Exit = $true }
-    )
+    $plans = @{ 
+        "1" = @{ Label = "leve de segunda a sábado + completa no domingo"; Description = "Recomendado. Leve às 12h; completa no domingo às 12h (com o PC desligado, roda quando ligar)." }
+        "2" = @{ Label = "só a leve, todo dia"; Description = "Limpeza, DNS, atualizações e relatório todo dia às 12h." }
+        "3" = @{ Label = "só a completa, uma vez por semana"; Description = "Domingo às 12h." }
+    }
 
-    $answer = Read-SnakeOptimizerChoice -Message "O que fazer?" -Options $options -DefaultKey "X" -ShowMenu -TextPrompt "Opção (número, X = voltar)"
+    $current = Get-SnakeOptimizerAutoCurrentPlan -Status $status
+    $isOn = [bool]$current
+
+    if ($isOn) {
+        $next = @($status | Where-Object { $_.Enabled -and $_.NextRun } | Sort-Object NextRun | Select-Object -First 1)
+        $what = $(if ($plans.ContainsKey($current)) { $plans[$current].Label } else { "um agendamento personalizado (veja Agendamento acima)" })
+        Write-SnakeOptimizerStatus -Type Success -Message "A manutenção automática JÁ ESTÁ AGENDADA e ligada: $what. Não precisa fazer nada: ela roda sozinha nos dias marcados."
+        if ($next) { Write-SnakeOptimizerStatus -Type Info -Message "Próxima execução: $(Format-SnakeOptimizerDateTime -When $next[0].NextRun) (manutenção $($next[0].Label))." }
+    }
+    else {
+        Write-SnakeOptimizerStatus -Type Warning -Message "A manutenção automática está DESLIGADA neste PC: nada roda sozinho. Escolha um agendamento abaixo para ligar."
+    }
+
+    Write-Host ""
+    $options = @()
+    foreach ($key in @("1", "2", "3")) {
+        if ($key -eq $current) {
+            $options += @{ Key = $key; Label = "Em uso agora: $($plans[$key].Label)"; Description = "É o agendamento atual. Já está valendo; não precisa escolher de novo." }
+        }
+        elseif ($isOn) {
+            $options += @{ Key = $key; Label = "Trocar para: $($plans[$key].Label)"; Description = "Substitui o agendamento atual. $($plans[$key].Description)" }
+        }
+        else {
+            $options += @{ Key = $key; Label = "Ligar: $($plans[$key].Label)"; Description = $plans[$key].Description; Accent = ($key -eq "1") }
+        }
+    }
+
+    $options += @{ Key = "4"; Label = "Rodar a leve agora"; Description = "Para testar: roda em segundo plano e aparece aqui nas últimas execuções quando terminar." }
+    if ($isOn) { $options += @{ Key = "5"; Label = "Desligar a manutenção automática"; Description = "Remove as tarefas. O histórico e os relatórios ficam." } }
+    $options += $(if ($isOn) { @{ Key = "X"; Label = "Manter como está"; Description = "O agendamento continua valendo"; Exit = $true; Accent = $true } } else { @{ Key = "X"; Label = "Voltar"; Exit = $true } })
+
+    $answer = Read-SnakeOptimizerChoice -Message $(if ($isOn) { "Já está agendada. Quer mudar alguma coisa?" } else { "Ligar a manutenção automática?" }) -Options $options -DefaultKey "X" -ShowMenu -TextPrompt "Opção (número, X = $(if ($isOn) { 'manter como está' } else { 'voltar' }))"
 
     if ([string]::IsNullOrWhiteSpace($answer) -or $answer -eq "X") {
+        if ($isOn) { Write-SnakeOptimizerStatus -Type Success -Message "Nada mudou: a manutenção automática continua agendada." }
         Exit-SnakeOptimizerAction -Result $null
+        return
+    }
+
+    if ($answer -eq $current) {
+        Write-SnakeOptimizerStatus -Type Success -Message "Já estava agendada assim ($($plans[$current].Label)). Nada mudou; continua valendo."
+        $final = New-SnakeOptimizerResult -Kind Ok -Detail "agendamento mantido: $($plans[$current].Label)" -Title $title
+        if ($PassThru) { $final }
+        Exit-SnakeOptimizerAction -Result $final
         return
     }
 
@@ -1979,7 +2058,10 @@ function Show-SnakeOptimizerAutoMaintenance {
         }
 
         if ($answer -in "1", "2", "3") {
-            Write-SnakeOptimizerStatus -Type Success -Message "Manutenção automática ligada: $($final.Detail). Ela baixa o SnakeOptimizer atualizado a cada execução."
+            $verb = $(if ($isOn) { "Agendamento trocado" } else { "Manutenção automática ligada e agendada" })
+            Write-SnakeOptimizerStatus -Type Success -Message "$($verb): $($final.Detail). Pronto: não precisa fazer mais nada, ela roda sozinha (e baixa o SnakeOptimizer atualizado a cada execução)."
+            $next = @(Get-SnakeOptimizerAutoStatus | Where-Object { $_.Enabled -and $_.NextRun } | Sort-Object NextRun | Select-Object -First 1)
+            if ($next) { Write-SnakeOptimizerStatus -Type Info -Message "Próxima execução: $(Format-SnakeOptimizerDateTime -When $next[0].NextRun) (manutenção $($next[0].Label))." }
         }
     }
     catch {

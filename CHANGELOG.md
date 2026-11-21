@@ -1,5 +1,11 @@
 # Histórico de mudanças do SnakeOptimizer
 
+## 1.9.11 — 21/11/2026
+
+- **Área técnica > Importar:** abre a janela "Abrir" do Windows para escolher o `.snakemail` (começa onde já houver um, na Área de Trabalho ou em Downloads), em vez de pedir o caminho digitado.
+- **Manutenção automática:** a tela diz de cara se já está agendada ("JÁ ESTÁ AGENDADA e ligada... não precisa fazer nada") e quando é a próxima execução. Ligada, o botão principal é **Manter como está**; a opção atual aparece como **Em uso agora** e as outras como **Trocar para**. Escolher a que já está em uso não refaz nada. Desligada, as opções dizem **Ligar**.
+- Os dias do agendamento são lidos também quando o Windows os devolve como máscara (126 = segunda a sábado).
+
 ## 1.9.10 — 21/11/2026
 
 - **E-mail com antivírus no meio:** antivírus como o AVG e o Avast interceptam a conexão segura do e-mail e trocam o certificado do servidor; na porta 465 o Windows recusa esse certificado e o envio falhava com "falha na conexão segura (SSL)". Agora, quando a porta configurada falha na conexão, o envio tenta a 2525 e a 587 (STARTTLS) do mesmo servidor. O e-mail de teste salva a porta que funcionou. Uma recusa do servidor (usuário ou senha) não troca de porta.

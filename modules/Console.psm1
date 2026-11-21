@@ -1586,4 +1586,88 @@ function Read-SnakeOptimizerText {
 }
 
 
+$script:SnakeOptimizerFilePickerSource = @"
+using System;
+using System.Threading;
+using System.Windows.Forms;
+
+namespace SnakeOptimizer
+{
+    public static class FilePicker
+    {
+        // A janela "Abrir" do Windows numa thread STA própria (as ações rodam fora da thread da janela), com uma dona
+        // invisível sempre por cima, para não abrir escondida atrás do SnakeOptimizer.
+        public static string Open(string title, string filter, string folder)
+        {
+            string chosen = null;
+            Exception failure = null;
+
+            Thread thread = new Thread(delegate ()
+            {
+                try
+                {
+                    using (Form owner = new Form())
+                    using (OpenFileDialog dialog = new OpenFileDialog())
+                    {
+                        owner.TopMost = true;
+                        owner.ShowInTaskbar = false;
+                        owner.FormBorderStyle = FormBorderStyle.None;
+                        owner.StartPosition = FormStartPosition.CenterScreen;
+                        owner.Size = new System.Drawing.Size(1, 1);
+                        owner.Opacity = 0;
+                        owner.Show();
+                        owner.Activate();
+
+                        dialog.Title = title;
+                        dialog.Filter = filter;
+                        dialog.InitialDirectory = folder;
+                        dialog.CheckFileExists = true;
+                        dialog.Multiselect = false;
+                        dialog.RestoreDirectory = true;
+
+                        if (dialog.ShowDialog(owner) == DialogResult.OK) { chosen = dialog.FileName; }
+                    }
+                }
+                catch (Exception e) { failure = e; }
+            });
+
+            thread.SetApartmentState(ApartmentState.STA);
+            thread.Start();
+            thread.Join();
+
+            if (failure != null) { throw failure; }
+            return chosen;
+        }
+    }
+}
+"@
+
+
+function Read-SnakeOptimizerFilePath {
+    <#
+    Escolher um arquivo pela janela "Abrir" do Windows (navegar, clicar, Abrir), em vez de digitar o caminho. Filter no
+    formato do Windows: "Configuração de e-mail (*.snakemail)|*.snakemail|Todos os arquivos (*.*)|*.*". Devolve o caminho
+    ou "" quando a pessoa cancela. Sem área de trabalho (SYSTEM, sessão remota sem janela), pede o caminho por texto.
+    #>
+    param (
+        [Parameter(Mandatory)][string]$Title,
+        [string]$Filter = "Todos os arquivos (*.*)|*.*",
+        [string]$Folder = [Environment]::GetFolderPath("Desktop")
+    )
+
+    try {
+        if (-not ("SnakeOptimizer.FilePicker" -as [type])) {
+            Add-Type -TypeDefinition $script:SnakeOptimizerFilePickerSource -ReferencedAssemblies System.Windows.Forms, System.Drawing -ErrorAction Stop
+        }
+
+        if (-not [Environment]::UserInteractive) { throw "sem área de trabalho" }
+        return [string][SnakeOptimizer.FilePicker]::Open($Title, $Filter, $Folder)
+    }
+    catch {
+        Write-Verbose "Seletor de arquivo: $($_.Exception.Message)"
+        return (Read-SnakeOptimizerText -Message "$Title - caminho do arquivo (vazio = cancelar)").Trim('"')
+    }
+}
+
+
 Export-ModuleMember -Function *
