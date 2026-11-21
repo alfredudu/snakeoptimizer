@@ -190,6 +190,16 @@ function Protect-InstallRoot {
     }
 }
 
+function Reset-AppAcl {
+    # A pasta app chega de uma pasta temporaria (a do SYSTEM, no Atualizador) e um Move mantem as permissoes de la: so
+    # SYSTEM e Administradores liam, e o icone da bandeja e a janela sem elevacao falhavam com "Acesso negado". Volta a
+    # herdar as permissoes da pasta do SnakeOptimizer (usuarios leem e executam; so Administradores alteram).
+    param ([string]$AppDir)
+
+    if (-not (Test-IsAdmin) -or $AppDir -notlike "$env:ProgramData*" -or -not (Test-Path -LiteralPath $AppDir)) { return }
+    & icacls.exe $AppDir /reset /T /C /Q *> $null
+}
+
 function Install-App {
     param ([string]$Root)
 
@@ -311,6 +321,7 @@ function Install-App {
         }
 
         Move-Item -LiteralPath $payload -Destination $appDir
+        Reset-AppAcl -AppDir $appDir
 
         # O launcher fica ao lado da pasta app (o Atualizador e os atalhos o usam) e a versao instalada e anotada.
         try { Copy-Item -LiteralPath (Join-Path $appDir "launch.ps1") -Destination (Join-Path $Root "launch.ps1") -Force -ErrorAction Stop } catch { }
@@ -538,6 +549,7 @@ function Install-Machine {
     $installedApp = Join-Path $Root "app"
     if (-not (Test-Path -LiteralPath (Join-Path $installedApp "$AppName.Gui.ps1"))) { throw "A copia em $installedApp nao esta completa." }
     Copy-Item -LiteralPath (Join-Path $installedApp "launch.ps1") -Destination (Join-Path $Root "launch.ps1") -Force
+    Reset-AppAcl -AppDir $installedApp
 
     Register-Updater -Root $Root
     $links = @(New-AppShortcuts -Root $Root)
@@ -669,6 +681,14 @@ try {
             }
             if (-not $UpdateInfo.Commit -and $UpdateInfo.Outcome -eq "Updated") { $text = "Atualizado (sem consultar o commit; limite do GitHub)." }
             # O icone da bandeja foi fechado para a troca: volta agora (com a versao nova).
+            # Copias trocadas por versoes anteriores (1.5 a 1.8.1) ficaram sem leitura para os usuarios: conserta uma vez.
+            $aclMark = Join-Path $root "permissoes-app.ok"
+            if ($UpdateInfo.Outcome -ne "InUse" -and -not (Test-Path -LiteralPath $aclMark)) {
+                Reset-AppAcl -AppDir (Join-Path $root "app")
+                try { Set-Content -LiteralPath $aclMark -Value "Permissoes da pasta app conferidas." -Encoding ASCII } catch { }
+                $text += " Permissoes da pasta app corrigidas (usuarios voltam a ler)."
+                if (-not $UpdateInfo.AgentRestarted) { $UpdateInfo.AgentRestarted = [bool](Start-AgentInUserSession -Root $root) }
+            }
             if ($UpdateInfo.AgentRestarted) { $text += " Icone da bandeja reaberto." }
             # Instalado pela 1.5.1 (entrada no registro): passa para a tarefa. E recria a tarefa se algo a apagou.
             if (-not (Test-Path -LiteralPath (Get-MonitorFlagPath $root)) -and (Test-Path -LiteralPath (Get-InstalledVersionPath $root)) -and

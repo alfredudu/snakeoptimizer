@@ -1,5 +1,9 @@
 # Histórico de mudanças do SnakeOptimizer
 
+## 1.8.2 — 21/11/2026
+
+- **Correção do ícone da bandeja que não abria:** quando o Atualizador (SYSTEM) trocava a pasta `app`, ela ficava com as permissões da pasta temporária do SYSTEM, e os usuários não conseguiam ler os arquivos. O ícone falhava ao abrir (resultado -196608), assim como a janela sem elevação. Agora a pasta volta a herdar as permissões de `%ProgramData%\SnakeOptimizer` (usuários leem; só Administradores alteram). As instalações já afetadas são consertadas sozinhas na próxima passada do Atualizador, que reabre o ícone.
+
 ## 1.8.1 — 21/11/2026
 
 - Remover o Office por completo: no registro (`HKLM\...\Office`, inclusive `WOW6432Node`), os **suplementos de outros programas** (Teams no Outlook, Adobe Acrobat, antivírus) agora ficam, para continuarem funcionando no Office novo. O resto sai, como antes.
