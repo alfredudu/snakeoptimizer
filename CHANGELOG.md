@@ -1,5 +1,9 @@
 # Histórico de mudanças do SnakeOptimizer
 
+## 1.8.9 — 21/11/2026
+
+- **Detalhes técnicos sem os vãos em branco:** no DISM, no SFC e nos outros programas com barra de progresso, cada atualização da barra vem com linhas vazias, e as das atualizações escondidas (a tela mostra a barra de 10 em 10%) ficavam: 15 a 20 linhas em branco entre um percentual e o seguinte. Agora, durante a barra, as linhas vazias não aparecem, e fora dela várias seguidas viram uma. Na janela, a barra nova substitui a anterior no mesmo lugar. Vale para todas as telas.
+
 ## 1.8.8 — 21/11/2026
 
 - Os cartões das páginas **Manutenção** e **Rede** continuavam pulando de linha. A 1.8.6 ainda dependia de a barra de rolagem estar à vista, e essa informação podia chegar atrasada. Agora a largura sai da área inteira da página, com o espaço da barra sempre reservado, e não depende mais dela.

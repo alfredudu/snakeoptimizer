@@ -1,7 +1,7 @@
 ﻿# Núcleo: ambiente, sessão, registro, log, formatação e execução de programas nativos.
 # Nada aqui desenha cabeçalhos ou faz perguntas; isso fica em Console.psm1.
 
-$script:SnakeOptimizerBuild = "1.8.8"
+$script:SnakeOptimizerBuild = "1.8.9"
 
 # A trava dos arquivos de estado (Invoke-SnakeOptimizerStateLock): uma por sessão do Windows.
 $script:SnakeOptimizerStateLockName = "Local\SnakeOptimizer.State"
@@ -1719,14 +1719,32 @@ function Test-SnakeOptimizerEchoLine {
     # Os quadros do indicador são curtos; as linhas de verdade quase nunca.
     if ($Line.Length -le 8 -and $Line -match '^[\s\x08]*[-\\|/][\s\x08]*$') { return $false }
 
+    # Linhas em branco: o DISM e o SFC mandam uma ou duas junto com cada atualização da barra. As atualizações escondidas
+    # (Test-SnakeOptimizerProgressStepShown) deixavam as delas na tela, 15 a 20 linhas vazias entre um percentual e o
+    # seguinte. Durante uma barra nenhuma aparece; fora dela, várias seguidas viram uma.
+    if ($Line -match '^[\s\x08]*$') {
+        if ([bool]$State.InBar -or [bool]$State.Blank) { return $false }
+
+        $State.Blank = $true
+        return $true
+    }
+
     $percent = $null
 
     # A maioria das linhas não tem "%" nem " / ": nem chama o reconhecedor.
     if ($Line.Contains("%") -or $Line.Contains(" / ")) { $percent = Get-SnakeOptimizerProgressPercent -Line $Line }
 
-    if ($null -eq $percent) { return $true }
+    if ($null -eq $percent) {
+        $State.InBar = $false
+        $State.Blank = $false
+        return $true
+    }
 
-    return (Test-SnakeOptimizerProgressStepShown -Percent $percent -State $State)
+    $State.InBar = $true
+    $show = Test-SnakeOptimizerProgressStepShown -Percent $percent -State $State
+    if ($show) { $State.Blank = $false }
+
+    return $show
 }
 
 

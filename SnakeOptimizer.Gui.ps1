@@ -1151,6 +1151,7 @@ function Reset-GuiOutput {
     $script:CurrentText = ""
     $script:LastLineInlines = @()
     $script:LastLineProgress = $false
+    $script:LastLineBlank = $false
     $script:LineCount = 0
 }
 
@@ -1166,6 +1167,17 @@ function Complete-GuiOutputLine {
         foreach ($run in $runs) { [void]$script:OutPara.Inlines.Remove($run) }
         return
     }
+
+    # Linhas em branco: nenhuma entre duas atualizações de uma barra (assim a nova substitui a anterior, logo abaixo do
+    # texto) e no máximo uma seguida no resto. Programas com barra mandam linhas vazias a cada atualização.
+    $isBlank = [string]::IsNullOrWhiteSpace($text)
+
+    if ($isBlank -and ($script:LastLineProgress -or $script:LastLineBlank)) {
+        foreach ($run in $runs) { [void]$script:OutPara.Inlines.Remove($run) }
+        return
+    }
+
+    $script:LastLineBlank = $isBlank
 
     # O resumo da execução: as mensagens de estado, as etapas, as linhas "rótulo : valor" e os títulos de seção
     # (confirmados pela linha de traços que vem logo depois deles).
