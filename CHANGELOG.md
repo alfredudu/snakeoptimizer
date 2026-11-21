@@ -1,5 +1,10 @@
 # Histórico de mudanças do SnakeOptimizer
 
+## 1.8 — 21/11/2026
+
+- **Aviso de memória no ícone da bandeja**: com a RAM acima de 90% em 3 leituras seguidas (uns 5 minutos), um balão diz quanto está em uso e qual programa mais ocupa. O clique abre "Liberar memória". Repete no máximo a cada 2 horas; um pico passageiro não avisa.
+- Menu do ícone: novo item "Liberar memória".
+
 ## 1.7 — 21/11/2026
 
 - O ícone da bandeja (instalação no PC) passa a abrir pela tarefa **`\SnakeOptimizer\Monitor`**, "ao entrar no Windows", para o grupo Usuários e sem elevação, no lugar da entrada em `HKLM\...\Run`. O antivírus (AVG) apagava essa entrada, por ser um PowerShell oculto na inicialização.

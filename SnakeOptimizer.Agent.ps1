@@ -388,6 +388,7 @@ function Update-AgentMenu {
     [void]$script:Menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
     Add-AgentMenuItem -Text "Verificar o PC" -Action "maintenance.checkup"
     Add-AgentMenuItem -Text "Acelerar agora" -Action "performance.boost"
+    Add-AgentMenuItem -Text "Liberar memória" -Action "performance.memory"
     Add-AgentMenuItem -Text "Limpeza rápida" -Action "cleanup.quick"
     [void]$script:Menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
 

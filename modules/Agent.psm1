@@ -7,6 +7,9 @@
 
 $script:SnakeOptimizerAgentRunKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
 $script:SnakeOptimizerAgentRunName = "SnakeOptimizer Monitor"
+# Aviso de memória: acima de quanto (% da RAM em uso) e quantas leituras seguidas já passaram dele.
+$script:SnakeOptimizerAgentMemoryLimit = 90
+$script:SnakeOptimizerAgentMemoryHigh = 0
 # A entrada para todos os usuários, gravada pela instalação no PC (launch.ps1 -Mode Install).
 $script:SnakeOptimizerAgentMachineRunKey = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run"
 # Onde o Gerenciador de Tarefas (aba Inicializar) marca uma entrada de Run como desativada.
@@ -20,7 +23,7 @@ function Get-SnakeOptimizerAgentActionIds {
     # As ações que o monitor pede à janela: as do menu do ícone e as dos avisos. A janela só roda estas quando o pedido
     # chega de outra abertura (Receive-SnakeOptimizerWindowRequest).
     # app.monitor (Configurar o monitor) só mostra a tela de escolha: nada muda sem um clique nela.
-    return @("performance.boost", "cleanup.quick", "maintenance.checkup", "diagnostics.pending-reboot", "security.status", "diagnostics.windows-support", "updates.winget", "app.monitor")
+    return @("performance.boost", "performance.memory", "performance.processes", "cleanup.quick", "maintenance.checkup", "diagnostics.pending-reboot", "security.status", "diagnostics.windows-support", "updates.winget", "app.monitor")
 }
 
 
@@ -274,6 +277,8 @@ function Get-SnakeOptimizerAgentChecks {
     # Heavy = leitura demorada, feita em segundo plano.
     return @(
         @{ Id = "disk"; EveryMinutes = 15; RepeatHours = 24; Heavy = $false },
+        # Memória: a cada passada do monitor (90 s); só avisa depois de 3 leituras seguidas acima do limite (uns 5 min).
+        @{ Id = "memory"; EveryMinutes = 1; RepeatHours = 2; Heavy = $false },
         @{ Id = "reboot"; EveryMinutes = 60; RepeatHours = 24; Heavy = $false },
         @{ Id = "maintenance"; EveryMinutes = 360; RepeatHours = 168; Heavy = $false },
         @{ Id = "protection"; EveryMinutes = 60; RepeatHours = 12; Heavy = $true },
@@ -481,6 +486,25 @@ function Get-SnakeOptimizerAgentReading {
                 $drive = $(if ([string]$env:SystemRoot -match '^([A-Za-z]:)') { $Matches[1].ToUpperInvariant() } else { "C:" })
 
                 return (New-SnakeOptimizerAgentAlert -Id "disk" -Title "Pouco espaço no disco $drive" -Text "Restam $(Format-SnakeOptimizerBytes -Bytes $space.FreeBytes) livres no disco do Windows ($drive). Clique para fazer uma limpeza rápida." -Action "cleanup.quick")
+            }
+            "memory" {
+                # RAM em uso acima de 90% por alguns minutos seguidos: um pico passageiro (abrir um programa) não avisa.
+                $os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop
+                $total = [double]$os.TotalVisibleMemorySize
+                if ($total -le 0) { return $null }
+                $used = [int][Math]::Round((1 - ([double]$os.FreePhysicalMemory / $total)) * 100)
+
+                if ($used -lt $script:SnakeOptimizerAgentMemoryLimit) { $script:SnakeOptimizerAgentMemoryHigh = 0; return $null }
+                $script:SnakeOptimizerAgentMemoryHigh++
+                if ($script:SnakeOptimizerAgentMemoryHigh -lt 3) { return $null }
+
+                # O programa que mais ocupa (somando as janelas e abas do mesmo programa, como o Chrome).
+                $top = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Name -notin @("Memory Compression", "System", "Idle", "Registry", "vmmem", "vmmemWSL") } |
+                    Group-Object -Property Name | ForEach-Object { [PSCustomObject]@{ Name = $_.Name; Bytes = ($_.Group | Measure-Object -Property WorkingSet64 -Sum).Sum; Label = (@($_.Group | Where-Object { $_.Description } | Select-Object -First 1).Description) } } |
+                    Sort-Object Bytes -Descending | Select-Object -First 1
+                $who = $(if ($top) { " O que mais usa: $(if ($top.Label) { $top.Label } else { $top.Name }) ($(Format-SnakeOptimizerBytes -Bytes $top.Bytes))." } else { "" })
+
+                return (New-SnakeOptimizerAgentAlert -Id "memory" -Title "Memória quase cheia ($used%)" -Text "A memória RAM está em $used% faz alguns minutos e o PC pode ficar lento.$who Clique para liberar memória." -Action "performance.memory")
             }
             "reboot" {
                 if (-not (Test-SnakeOptimizerPendingReboot)) { return $null }
