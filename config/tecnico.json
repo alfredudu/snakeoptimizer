@@ -1,0 +1,7 @@
+{
+    "Algorithm":  "PBKDF2-SHA256",
+    "Iterations":  200000,
+    "Salt":  "HseQLm4pM4SdPbrOoVy6SQ==",
+    "Hash":  "+ASaM8x8Lri8eOe7DlGrTbtu6kiwO9Yw5bGanqvKnj4=",
+    "CreatedAt":  "2026-11-21"
+}
