@@ -1,7 +1,7 @@
 ﻿# Núcleo: ambiente, sessão, registro, log, formatação e execução de programas nativos.
 # Nada aqui desenha cabeçalhos ou faz perguntas; isso fica em Console.psm1.
 
-$script:SnakeOptimizerBuild = "1.9.12"
+$script:SnakeOptimizerBuild = "1.9.13"
 
 # A trava dos arquivos de estado (Invoke-SnakeOptimizerStateLock): uma por sessão do Windows.
 $script:SnakeOptimizerStateLockName = "Local\SnakeOptimizer.State"
@@ -1876,13 +1876,18 @@ function Select-SnakeOptimizerLegacyEncoding {
 
     if ($oem.CodePage -eq $ansi.CodePage) { return $oem }
 
-    $letters = "áàâãéêíóôõúüçÁÀÂÃÉÊÍÓÔÕÚÜÇñÑ"
+    # Minúscula acentuada vale mais que maiúscula: o primeiro acento do CHKDSK costuma ser o "é" de "arquivos é NTFS",
+    # que na OEM vira "Ú", também uma letra; com o mesmo peso dava empate e a OEM (errada para o CHKDSK) ganhava.
+    $lower = "áàâãéêíóôõúüçñ"
+    $upper = "ÁÀÂÃÉÊÍÓÔÕÚÜÇÑ"
     $score = {
         param ($text)
         $value = 0
         foreach ($char in $text.ToCharArray()) {
             if ([int]$char -lt 0x80) { continue }
-            if ($letters.IndexOf($char) -ge 0) { $value += 2 } else { $value -= 1 }
+            if ($lower.IndexOf($char) -ge 0) { $value += 3 }
+            elseif ($upper.IndexOf($char) -ge 0) { $value += 1 }
+            else { $value -= 1 }
         }
         $value
     }

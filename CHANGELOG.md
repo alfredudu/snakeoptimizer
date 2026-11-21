@@ -1,5 +1,10 @@
 # Histórico de mudanças do SnakeOptimizer
 
+## 1.9.13 — 21/11/2026
+
+- **Saúde dos SSDs NVMe em %:** a Saúde dos discos e o Inventário completo leem o registro de saúde do próprio SSD (o mesmo que o Hard Disk Sentinel e o CrystalDiskInfo usam), em vez de só o resumo do Windows, que costuma vir com o desgaste em 0% e sem horas. Novas linhas: **Saúde** (100% menos a vida útil usada, limitada pela reserva de blocos), **Reserva do SSD**, **Total gravado**, **Ligações**, **Desligamentos bruscos** e **Erros de mídia**, além das horas ligado e da temperatura do próprio disco. Alertas novos: aviso crítico do SSD, reserva no limite e erros de mídia. Exige Administrador.
+- **Detalhes técnicos:** os acentos do CHKDSK voltavam a sair trocados ("Estßgio", "concluÝdos") quando o primeiro acento da saída era o "é" de "arquivos é NTFS", que empatava entre as duas codificações. As minúsculas acentuadas passaram a pesar mais na escolha.
+
 ## 1.9.12 — 21/11/2026
 
 - **Ignorar programas no winget:** a lista de Atualizar programas (winget), também no Otimizar, ganhou **Ignorar programas**. Os marcados (um driver ODBC, um agente que só atualiza sem Administrador) somem da lista, ficam fora do **Atualizar todos** e deixam de contar como desatualizados no Verificar o PC e no monitor da bandeja. A lista é do PC (`%ProgramData%\SnakeOptimizer\winget-ignorados.json`).

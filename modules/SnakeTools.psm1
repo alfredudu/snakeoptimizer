@@ -1411,6 +1411,8 @@ function Get-SnakeOptimizerDiskInventory {
             BytesRead              = $(if ($bytesRead -and [double]$bytesRead -gt 0) { $bytesRead } else { $null })
             BytesWritten           = $(if ($bytesWritten -and [double]$bytesWritten -gt 0) { $bytesWritten } else { $null })
         }
+        # NVMe: o registro de saúde do próprio SSD (saúde em %, horas, erros), mais completo que o resumo do Windows.
+        [void](Add-SnakeOptimizerNvmeDetails -Disk $disk -Number $number)
         $disk | Add-Member -NotePropertyName Notes -NotePropertyValue @(Get-SnakeOptimizerDiskHealthNotes -Disk $disk)
         $disks += $disk
     }
@@ -1487,9 +1489,17 @@ function Get-SnakeOptimizerDiskInventoryLines {
         }
         else {
             & $kv "Temperatura" $(if ($null -ne $d.Temperature) { "$($d.Temperature) °C" } else { "não informada" })
+            $healthPercent = Get-SnakeOptimizerJsonValue -Object $d -Name "HealthPercent" -Default $null
+            if ($null -ne $healthPercent) { & $kv "Saúde" "$healthPercent% (estimada pelo registro de saúde do SSD)" }
             & $kv "Desgaste" $(if ($d.Type -eq "HDD") { "não se aplica (HDD)" } elseif ($null -ne $d.Wear) { "$($d.Wear)% da vida útil" } else { "não informado" })
+            $spare = Get-SnakeOptimizerJsonValue -Object $d -Name "AvailableSpare" -Default $null
+            if ($null -ne $spare) { & $kv "Reserva do SSD" "$spare% (alerta abaixo de $(Get-SnakeOptimizerJsonValue -Object $d -Name 'SpareThreshold' -Default '?')%)" }
             & $kv "Horas ligado" (& $na $d.PowerOnHours)
             & $kv "Ligações (power cycles)" (& $na $d.PowerCycles)
+            $unsafe = Get-SnakeOptimizerJsonValue -Object $d -Name "UnsafeShutdowns" -Default $null
+            if ($null -ne $unsafe) { & $kv "Desligamentos bruscos" $unsafe }
+            $media = Get-SnakeOptimizerJsonValue -Object $d -Name "MediaErrors" -Default $null
+            if ($null -ne $media) { & $kv "Erros de mídia" $media }
             & $kv "Erros de leitura" "$(& $na $d.ReadErrorsTotal) (não corrigidos: $(& $na $d.ReadErrorsUncorrected))"
             & $kv "Erros de escrita" "$(& $na $d.WriteErrorsTotal) (não corrigidos: $(& $na $d.WriteErrorsUncorrected))"
         }
@@ -1562,17 +1572,24 @@ function Show-SnakeOptimizerDiskInventory {
         $status = Get-SnakeOptimizerDiskHealthStatusText -Status $d.HealthStatus
         Write-SnakeOptimizerSection -Title "Disco $($d.Number): $($d.Name) ($($d.Type), $(Format-SnakeOptimizerBytes -Bytes $d.Size))"
         Write-SnakeOptimizerKeyValue -Label "Estado" -Value $status -Level $(switch ($status) { "Saudável" { "Ok" } "Atenção" { "Warn" } "Com defeito" { "Bad" } default { "Normal" } })
+        Write-SnakeOptimizerDiskHealthPercentLine -Disk $d
         Write-SnakeOptimizerKeyValue -Label "Unidades" -Value $(if ($d.Volumes.Count) { ($d.Volumes | ForEach-Object { "$($_.Letter) $([Math]::Round($_.Used))% usado" }) -join ", " } else { "nenhuma com letra" })
         Write-SnakeOptimizerKeyValue -Label "Interface" -Value "$($d.Bus) · $($d.Format)"
         Write-SnakeOptimizerKeyValue -Label "Serial / firmware" -Value "$(if ($d.Serial) { $d.Serial } else { '-' }) / $(if ($d.Firmware) { $d.Firmware } else { '-' })"
         if ($d.Boot -or $d.SystemDisk) { Write-SnakeOptimizerKeyValue -Label "Papel" -Value "disco do Windows (partida/sistema)" }
         Write-SnakeOptimizerKeyValue -Label "Temperatura" -Value $(if ($null -ne $d.Temperature) { "$($d.Temperature) °C" } else { $null })
-        Write-SnakeOptimizerKeyValue -Label "Desgaste" -Value $(if ($d.Type -eq "HDD") { $null } elseif ($null -ne $d.Wear) { "$($d.Wear)% da vida útil" } else { $null })
+        if ($null -eq (Get-SnakeOptimizerJsonValue -Object $d -Name "HealthPercent" -Default $null)) {
+            Write-SnakeOptimizerKeyValue -Label "Desgaste" -Value $(if ($d.Type -eq "HDD") { $null } elseif ($null -ne $d.Wear) { "$($d.Wear)% da vida útil" } else { $null })
+        }
         Write-SnakeOptimizerKeyValue -Label "Horas ligado" -Value $(if ($null -ne $d.PowerOnHours) { "$(Format-SnakeOptimizerNumber -Value ([double]$d.PowerOnHours)) h" } else { $null })
         if ($null -ne $d.ReadErrorsTotal -or $null -ne $d.WriteErrorsTotal) {
             Write-SnakeOptimizerKeyValue -Label "Erros" -Value "leitura $([string]$d.ReadErrorsTotal), escrita $([string]$d.WriteErrorsTotal)"
         }
-        if ($d.BytesWritten) { Write-SnakeOptimizerKeyValue -Label "Total gravado" -Value (Format-SnakeOptimizerBytes -Bytes $d.BytesWritten) }
+        if ($null -ne (Get-SnakeOptimizerJsonValue -Object $d -Name "AvailableSpare" -Default $null)) {
+            # NVMe lido direto: reserva, gravado, ligações, desligamentos bruscos e erros de mídia.
+            Write-SnakeOptimizerDiskNvmeExtraLines -Disk $d
+        }
+        elseif ($d.BytesWritten) { Write-SnakeOptimizerKeyValue -Label "Total gravado" -Value (Format-SnakeOptimizerBytes -Bytes $d.BytesWritten) }
         foreach ($n in $d.Notes) { Write-SnakeOptimizerStatus -Type Warning -Message "$n." }
     }
 

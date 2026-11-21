@@ -1375,6 +1375,188 @@ function Show-SnakeOptimizerPendingReboot {
 }
 
 
+$script:SnakeOptimizerNvmeSource = @"
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+
+namespace SnakeOptimizer
+{
+    public static class NvmeHealthLog
+    {
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        private static extern SafeFileHandle CreateFile(string name, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool DeviceIoControl(SafeFileHandle device, uint code, byte[] input, int inputSize, byte[] output, int outputSize, out int returned, IntPtr overlapped);
+
+        // O registro de saúde (SMART / Health Information, página 02h) de um SSD NVMe, pelo driver do próprio Windows
+        // (IOCTL_STORAGE_QUERY_PROPERTY com StorageDeviceProtocolSpecificProperty). Exige Administrador.
+        public static byte[] Read(int diskNumber)
+        {
+            using (SafeFileHandle device = CreateFile(@"\\.\PhysicalDrive" + diskNumber, 0xC0000000, 3, IntPtr.Zero, 3, 0, IntPtr.Zero))
+            {
+                if (device.IsInvalid) { throw new Win32Exception(Marshal.GetLastWin32Error()); }
+
+                // STORAGE_PROPERTY_QUERY (8 bytes) + STORAGE_PROTOCOL_SPECIFIC_DATA (40 bytes) + o registro (512 bytes).
+                int size = 8 + 40 + 512;
+                byte[] input = new byte[size];
+                byte[] output = new byte[size];
+                BitConverter.GetBytes(50).CopyTo(input, 0);   // StorageDeviceProtocolSpecificProperty
+                BitConverter.GetBytes(0).CopyTo(input, 4);    // PropertyStandardQuery
+                BitConverter.GetBytes(3).CopyTo(input, 8);    // ProtocolTypeNvme
+                BitConverter.GetBytes(2).CopyTo(input, 12);   // NVMeDataTypeLogPage
+                BitConverter.GetBytes(2).CopyTo(input, 16);   // página 02h: SMART / Health Information
+                BitConverter.GetBytes(0).CopyTo(input, 20);
+                BitConverter.GetBytes(40).CopyTo(input, 24);  // os dados vêm logo depois da estrutura
+                BitConverter.GetBytes(512).CopyTo(input, 28);
+
+                int returned;
+                if (!DeviceIoControl(device, 0x002D1400, input, size, output, size, out returned, IntPtr.Zero)) { throw new Win32Exception(Marshal.GetLastWin32Error()); }
+
+                // STORAGE_PROTOCOL_DATA_DESCRIPTOR: Version, Size e a mesma estrutura de 40 bytes; os dados ficam em 8 + offset.
+                int offset = BitConverter.ToInt32(output, 8 + 16);
+                int length = BitConverter.ToInt32(output, 8 + 20);
+                if (length < 192 || offset < 0 || 8 + offset + 192 > output.Length) { throw new InvalidOperationException("o disco não devolveu o registro de saúde"); }
+
+                byte[] log = new byte[512];
+                Array.Copy(output, 8 + offset, log, 0, Math.Min(512, Math.Min(length, output.Length - 8 - offset)));
+                return log;
+            }
+        }
+    }
+}
+"@
+
+
+function Get-SnakeOptimizerNvmeHealth {
+    <#
+    O registro de saúde de um SSD NVMe, lido do próprio disco (o mesmo que o Hard Disk Sentinel e o CrystalDiskInfo usam):
+    o contador resumido do Windows (Get-StorageReliabilityCounter) costuma vir sem horas, sem erros e com o desgaste em 0.
+    Devolve $null quando não dá (sem Administrador, disco que não é NVMe, controladora que não repassa o pedido).
+    #>
+    param ([Parameter(Mandatory)][int]$DiskNumber)
+
+    try {
+        if (-not ("SnakeOptimizer.NvmeHealthLog" -as [type])) { Add-Type -TypeDefinition $script:SnakeOptimizerNvmeSource -ErrorAction Stop }
+        $log = [SnakeOptimizer.NvmeHealthLog]::Read($DiskNumber)
+    }
+    catch {
+        Write-Verbose "NVMe ${DiskNumber}: $($_.Exception.Message)"
+        return $null
+    }
+
+    # Os contadores são de 128 bits; os 64 de baixo bastam (passam de 9 trilhões).
+    $u64 = { param ($at) [double][BitConverter]::ToUInt64($log, $at) }
+    $kelvin = [int][BitConverter]::ToUInt16($log, 1)
+
+    # "Unidades de dados" do NVMe: 1000 setores de 512 bytes cada.
+    return [PSCustomObject]@{
+        CriticalWarning = [int]$log[0]
+        Temperature     = $(if ($kelvin -gt 273) { $kelvin - 273 } else { $null })
+        AvailableSpare  = [int]$log[3]
+        SpareThreshold  = [int]$log[4]
+        PercentageUsed  = [int]$log[5]
+        BytesRead       = (& $u64 32) * 512000
+        BytesWritten    = (& $u64 48) * 512000
+        PowerCycles     = (& $u64 112)
+        PowerOnHours    = (& $u64 128)
+        UnsafeShutdowns = (& $u64 144)
+        MediaErrors     = (& $u64 160)
+        ErrorLogEntries = (& $u64 176)
+    }
+}
+
+
+function Get-SnakeOptimizerNvmeHealthPercent {
+    <#
+    A saúde estimada de um SSD NVMe em %, no jeito dos programas de diagnóstico: 100 menos a vida útil já usada que o
+    próprio disco informa, limitada pela reserva de blocos que sobra (uma reserva baixando é o sinal de que o SSD está
+    trocando blocos gastos). O aviso crítico do disco (reserva abaixo do limite, só leitura, falha de mídia) derruba
+    para no máximo 10%. É uma estimativa: cada programa usa a sua conta, e os números podem diferir em alguns pontos.
+    #>
+    param ([Parameter(Mandatory)]$Health)
+
+    # $score, e não $health: no PowerShell $health e $Health são a mesma variável, e apagariam o parâmetro.
+    $score = 100 - [Math]::Min(100, [int]$Health.PercentageUsed)
+    if ([int]$Health.AvailableSpare -ge 0 -and [int]$Health.AvailableSpare -le 100) { $score = [Math]::Min($score, [int]$Health.AvailableSpare) }
+    if (([int]$Health.CriticalWarning -band 0x0D) -ne 0) { $score = [Math]::Min($score, 10) }
+    return [int][Math]::Max(0, $score)
+}
+
+
+function Add-SnakeOptimizerNvmeDetails {
+    <#
+    Completa um disco (de Get-SnakeOptimizerDiskHealth ou do inventário) com o registro de saúde do NVMe: saúde em %,
+    reserva, gravado, horas, ligações, desligamentos bruscos e erros de mídia. Os valores do próprio disco valem mais que
+    os do contador resumido do Windows. Devolve $true quando leu.
+    #>
+    param (
+        [Parameter(Mandatory)]$Disk,
+        [Parameter(Mandatory)][string]$Number
+    )
+
+    $type = [string](Get-SnakeOptimizerJsonValue -Object $Disk -Name "Type" -Default "")
+    $value = 0
+    if ($type -ne "NVMe" -or -not [int]::TryParse($Number, [ref]$value)) { return $false }
+
+    $log = Get-SnakeOptimizerNvmeHealth -DiskNumber $value
+    if ($null -eq $log) { return $false }
+
+    $set = { param ($name, $new) if ($null -eq $new) { return }; if ($Disk.PSObject.Properties[$name]) { $Disk.$name = $new } else { $Disk | Add-Member -NotePropertyName $name -NotePropertyValue $new } }
+
+    & $set "HealthPercent" (Get-SnakeOptimizerNvmeHealthPercent -Health $log)
+    & $set "Wear" ([Math]::Min(100, $log.PercentageUsed))
+    & $set "AvailableSpare" $log.AvailableSpare
+    & $set "SpareThreshold" $log.SpareThreshold
+    & $set "CriticalWarning" $log.CriticalWarning
+    & $set "UnsafeShutdowns" $log.UnsafeShutdowns
+    & $set "MediaErrors" $log.MediaErrors
+    if ($null -ne $log.Temperature -and $log.Temperature -le 127) { & $set "Temperature" $log.Temperature }
+    if ($log.PowerOnHours -gt 0) { & $set "PowerOnHours" ([int64]$log.PowerOnHours) }
+    if ($log.PowerCycles -gt 0) { & $set "PowerCycles" ([int64]$log.PowerCycles) }
+    if ($log.BytesWritten -gt 0) { & $set "BytesWritten" $log.BytesWritten }
+    if ($log.BytesRead -gt 0) { & $set "BytesRead" $log.BytesRead }
+    if ($Disk.PSObject.Properties["CountersAvailable"]) { $Disk.CountersAvailable = $true }
+    return $true
+}
+
+
+function Write-SnakeOptimizerDiskHealthPercentLine {
+    # "Saúde: 89% (vida útil usada: 11%)", com a cor pelo número: abaixo de 50% atenção, abaixo de 20% ruim.
+    param ([Parameter(Mandatory)]$Disk)
+
+    $percent = Get-SnakeOptimizerJsonValue -Object $Disk -Name "HealthPercent" -Default $null
+    if ($null -eq $percent) { return }
+
+    $used = Get-SnakeOptimizerJsonValue -Object $Disk -Name "Wear" -Default $null
+    $level = $(if ([int]$percent -lt 20) { "Bad" } elseif ([int]$percent -lt 50) { "Warn" } else { "Ok" })
+    Write-SnakeOptimizerKeyValue -Label "Saúde" -Value "$percent%$(if ($null -ne $used) { " (vida útil usada: $used%)" })" -Level $level
+}
+
+
+function Write-SnakeOptimizerDiskNvmeExtraLines {
+    # O que só o registro de saúde do NVMe traz: reserva, total gravado, ligações e desligamentos bruscos.
+    param ([Parameter(Mandatory)]$Disk)
+
+    $spare = Get-SnakeOptimizerJsonValue -Object $Disk -Name "AvailableSpare" -Default $null
+    if ($null -eq $spare) { return }
+
+    $threshold = Get-SnakeOptimizerJsonValue -Object $Disk -Name "SpareThreshold" -Default $null
+    $written = Get-SnakeOptimizerJsonValue -Object $Disk -Name "BytesWritten" -Default $null
+    $cycles = Get-SnakeOptimizerJsonValue -Object $Disk -Name "PowerCycles" -Default $null
+    $unsafe = Get-SnakeOptimizerJsonValue -Object $Disk -Name "UnsafeShutdowns" -Default $null
+    $media = Get-SnakeOptimizerJsonValue -Object $Disk -Name "MediaErrors" -Default $null
+
+    Write-SnakeOptimizerKeyValue -Label "Reserva do SSD" -Value "$spare%$(if ($null -ne $threshold) { " (alerta abaixo de $threshold%)" })" -Level $(if ($null -ne $threshold -and [int]$spare -le [int]$threshold) { "Bad" } else { "Normal" })
+    if ($written) { Write-SnakeOptimizerKeyValue -Label "Total gravado" -Value (Format-SnakeOptimizerBytes -Bytes ([double]$written)) }
+    if ($null -ne $cycles) { Write-SnakeOptimizerKeyValue -Label "Ligações" -Value (Format-SnakeOptimizerNumber -Value ([double]$cycles)) }
+    if ($null -ne $unsafe) { Write-SnakeOptimizerKeyValue -Label "Desligamentos bruscos" -Value (Format-SnakeOptimizerNumber -Value ([double]$unsafe)) }
+    if ($null -ne $media) { Write-SnakeOptimizerKeyValue -Label "Erros de mídia" -Value (Format-SnakeOptimizerNumber -Value ([double]$media)) -Level $(if ([double]$media -gt 0) { "Warn" } else { "Normal" }) }
+}
+
+
 function Get-SnakeOptimizerDiskHealthStatusText {
     # O estado geral que o Windows dá ao disco (HealthStatus), em português. Vem como nome (Healthy) ou como número (0).
     param (
@@ -1431,6 +1613,23 @@ function Get-SnakeOptimizerDiskHealthNotes {
 
     if ($null -ne $temperature -and [int]$temperature -ge $(if ($isHdd) { 55 } elseif ($isSsd) { 70 } else { 60 })) {
         $notes += "Temperatura alta ($temperature °C)"
+    }
+
+    # Do registro de saúde do NVMe (Add-SnakeOptimizerNvmeDetails), quando lido.
+    $critical = Get-SnakeOptimizerJsonValue -Object $Disk -Name "CriticalWarning" -Default $null
+    $spare = Get-SnakeOptimizerJsonValue -Object $Disk -Name "AvailableSpare" -Default $null
+    $threshold = Get-SnakeOptimizerJsonValue -Object $Disk -Name "SpareThreshold" -Default $null
+    $media = Get-SnakeOptimizerJsonValue -Object $Disk -Name "MediaErrors" -Default $null
+
+    if ($null -ne $critical -and ([int]$critical -band 0x0D) -ne 0) {
+        $notes += "O próprio SSD está em alerta crítico (reserva esgotando, só leitura ou falha de mídia)"
+    }
+    elseif ($null -ne $spare -and $null -ne $threshold -and [int]$threshold -gt 0 -and [int]$spare -le [int]$threshold) {
+        $notes += "A reserva de blocos do SSD chegou ao limite ($spare%)"
+    }
+
+    if ($null -ne $media -and [double]$media -gt 0) {
+        $notes += "O SSD registrou $media erros de mídia (dados que não puderam ser lidos ou gravados)"
     }
 
     if ($null -ne $readErrors -and [int64]$readErrors -gt 0) {
@@ -1531,6 +1730,9 @@ function Get-SnakeOptimizerDiskHealth {
             WriteErrorsUncorrected = $writeErrors
         }
 
+        # NVMe: o registro de saúde do próprio SSD (saúde em %, horas, erros), mais completo que o resumo do Windows.
+        [void](Add-SnakeOptimizerNvmeDetails -Disk $disk -Number $deviceId)
+
         $disk | Add-Member -NotePropertyName Notes -NotePropertyValue @(Get-SnakeOptimizerDiskHealthNotes -Disk $disk)
         $result += $disk
     }
@@ -1561,10 +1763,14 @@ function Show-SnakeOptimizerDiskHealth {
         Write-SnakeOptimizerSection -Title "$($disk.Name) ($($disk.Type), $(Format-SnakeOptimizerBytes -Bytes $disk.SizeBytes -ZeroText "tamanho desconhecido"))"
         if ($drives.Count -gt 0) { Write-SnakeOptimizerKeyValue -Label "Unidades" -Value ($drives -join ", ") }
         Write-SnakeOptimizerKeyValue -Label "Estado" -Value $status -Level $(switch ($status) { "Saudável" { "Ok" } "Atenção" { "Warn" } "Com defeito" { "Bad" } default { "Normal" } })
+        Write-SnakeOptimizerDiskHealthPercentLine -Disk $disk
         Write-SnakeOptimizerKeyValue -Label "Temperatura" -Value $(if ($null -ne $disk.Temperature) { "$($disk.Temperature) °C" } else { $null })
-        Write-SnakeOptimizerKeyValue -Label "Desgaste" -Value $(if ($isHdd) { "Não se aplica (HDD)" } elseif ($null -ne $disk.Wear) { "$($disk.Wear)% da vida útil estimada" } else { $null })
+        if ($null -eq (Get-SnakeOptimizerJsonValue -Object $disk -Name "HealthPercent" -Default $null)) {
+            Write-SnakeOptimizerKeyValue -Label "Desgaste" -Value $(if ($isHdd) { "Não se aplica (HDD)" } elseif ($null -ne $disk.Wear) { "$($disk.Wear)% da vida útil estimada" } else { $null })
+        }
         Write-SnakeOptimizerKeyValue -Label "Horas ligado" -Value $(if ($null -eq $disk.PowerOnHours) { $null } elseif ([double]$disk.PowerOnHours -eq 1) { "1 hora" } else { "$(Format-SnakeOptimizerNumber -Value ([double]$disk.PowerOnHours)) horas" })
         Write-SnakeOptimizerKeyValue -Label "Erros não corrigidos" -Value $(if ($null -ne $disk.ReadErrorsUncorrected -or $null -ne $disk.WriteErrorsUncorrected) { "$(& $errorText $disk.ReadErrorsUncorrected) de leitura, $(& $errorText $disk.WriteErrorsUncorrected) de escrita" } else { $null })
+        Write-SnakeOptimizerDiskNvmeExtraLines -Disk $disk
 
         Write-Host ""
 
