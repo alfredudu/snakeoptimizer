@@ -1,5 +1,9 @@
 # Histórico de mudanças do SnakeOptimizer
 
+## 1.8.5 — 21/11/2026
+
+- Janela: ao maximizar, restaurar ou mudar o tamanho, a página se reajusta quando o tamanho para de mudar e é redesenhada inteira. No Início, os atalhos de "Por onde começar" ficavam um por linha, com a largura antiga e espaço sobrando à direita, e cartões antigos deixavam rastro na tela.
+
 ## 1.8.4 — 21/11/2026
 
 - **Gerenciar inicialização** mostra direto a lista de tudo o que abre com o Windows, com caixas de marcar: o que abre hoje vem marcado. Desmarque o que não precisa abrir, marque o que quer de volta e clique em **Aplicar**. Antes, a tela perguntava primeiro "Desativar itens" ou "Reativar itens", e a lista só aparecia depois.

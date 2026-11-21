@@ -4960,6 +4960,31 @@ function Update-GuiContentWidth {
 
 $pageScroll.Add_SizeChanged({ Update-GuiContentWidth })
 
+# Ao maximizar, restaurar ou soltar a borda da janela, a grade é conferida de novo quando o tamanho para de mudar (com a
+# largura que a área tem de fato), e a janela é redesenhada inteira: os atalhos do Início ficavam com a meia linha da
+# largura anterior (um por linha, sobrando espaço à direita), e o que estava na tela antes deixava rastros à direita.
+$script:ResizeTimer = New-Object System.Windows.Threading.DispatcherTimer
+$script:ResizeTimer.Interval = [TimeSpan]::FromMilliseconds(200)
+$script:ResizeTimer.Add_Tick({
+    $script:ResizeTimer.Stop()
+
+    try {
+        $window.UpdateLayout()
+        Update-GuiContentWidth
+        $window.Resources["CardWidth"] = [double]$script:CardWidth
+        $window.Resources["WideCardWidth"] = [double]$script:WideCardWidth
+        $contentPanel.InvalidateMeasure()
+        $window.UpdateLayout()
+        $window.InvalidateVisual()
+    }
+    catch {
+        Write-Verbose "Redesenho depois de mudar o tamanho: $($_.Exception.Message)"
+    }
+})
+
+$window.Add_SizeChanged({ $script:ResizeTimer.Stop(); $script:ResizeTimer.Start() })
+$window.Add_StateChanged({ $script:ResizeTimer.Stop(); $script:ResizeTimer.Start() })
+
 # A tela de execução tem a largura da área (menos as margens) até a das quatro colunas de cartões. Largura fixa, e não
 # alinhada pelo conteúdo: assim ela não começa estreita e cresce conforme chegam linhas compridas.
 function Update-GuiRunViewWidth {
