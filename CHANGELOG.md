@@ -1,5 +1,9 @@
 # Histórico de mudanças do SnakeOptimizer
 
+## 1.9.6 — 21/11/2026
+
+- **Início:** botão **Descartar** nos avisos da nota de saúde (como "A última manutenção terminou com 1 etapa pedindo atenção"). O aviso some e deixa de descontar da nota até a situação mudar: a próxima manutenção com problema, por exemplo, aparece de novo. Os avisos graves (vírus, antivírus ou firewall desligado, disco quase cheio) não têm o botão.
+
 ## 1.9.5 — 21/11/2026
 
 - **Detalhes técnicos:** acentos certos na saída do CHKDSK ("Estágio", "concluídos", "Verificação de índices"). O CHKDSK escreve numa codificação diferente da do DISM, e a leitura usava a do DISM para os dois; agora ela reconhece qual o programa usou. As mensagens de erro dos programas passam pela mesma leitura.

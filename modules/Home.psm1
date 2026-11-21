@@ -175,7 +175,11 @@ function New-SnakeOptimizerHealthIssue {
         [Parameter(Mandatory)][string]$Text,
         [Parameter(Mandatory)][int]$Weight,
         [Parameter(Mandatory)][string]$Target,
-        [Parameter(Mandatory)][string]$ButtonText
+        [Parameter(Mandatory)][string]$ButtonText,
+
+        # O que identifica esta ocorrência para o "Descartar": por padrão, o texto (mudou o texto, é outra situação e o
+        # ponto volta). A manutenção usa a data dela: a próxima manutenção com problema volta a aparecer.
+        [string]$DismissKey = ""
     )
 
     return [PSCustomObject]@{
@@ -185,7 +189,43 @@ function New-SnakeOptimizerHealthIssue {
         Severe     = ($Weight -ge $script:SnakeOptimizerHealthSevereWeight)
         Target     = $Target
         ButtonText = $ButtonText
+        DismissKey = "$Id|$(if ($DismissKey) { $DismissKey } else { $Text })"
     }
+}
+
+
+function Get-SnakeOptimizerDismissedIssuesPath {
+    return (Join-Path (Get-SnakeOptimizerDataPath) "inicio-descartados.json")
+}
+
+
+function Get-SnakeOptimizerDismissedIssueKeys {
+    # As chaves dos pontos de atenção que a pessoa descartou no Início (as mais recentes, até 50).
+    try {
+        $state = Read-SnakeOptimizerStateFile -Path (Get-SnakeOptimizerDismissedIssuesPath)
+        if ($null -eq $state.Document) { return @() }
+        return @(@($state.Document) | ForEach-Object { [string]$_ } | Where-Object { $_ })
+    }
+    catch {
+        return @()
+    }
+}
+
+
+function Add-SnakeOptimizerDismissedIssue {
+    <#
+    Descarta um ponto de atenção do Início: ele some da lista e para de descontar da nota, até a situação mudar (outra
+    chave). Os graves (vírus, antivírus desligado, disco quase cheio) não podem ser descartados.
+    #>
+    param ([Parameter(Mandatory)]$Issue)
+
+    if ([bool]$Issue.Severe -or [string]::IsNullOrWhiteSpace([string]$Issue.DismissKey)) { return $false }
+
+    $keys = @(Get-SnakeOptimizerDismissedIssueKeys | Where-Object { $_ -ne [string]$Issue.DismissKey }) + @([string]$Issue.DismissKey)
+    if ($keys.Count -gt 50) { $keys = @($keys | Select-Object -Last 50) }
+
+    Write-SnakeOptimizerStateJson -Path (Get-SnakeOptimizerDismissedIssuesPath) -InputObject $keys -AsList
+    return $true
 }
 
 
@@ -201,7 +241,9 @@ function Get-SnakeOptimizerHealthScore {
         [string[]]$Unread = @()
     )
 
-    $list = @($Issues | Where-Object { $null -ne $_ })
+    # Os que a pessoa descartou no Início ficam de fora (os graves nunca são descartados).
+    $dismissed = @(Get-SnakeOptimizerDismissedIssueKeys)
+    $list = @($Issues | Where-Object { $null -ne $_ -and ([bool]$_.Severe -or $dismissed -notcontains [string]$_.DismissKey) })
     $penalty = 0
 
     foreach ($issue in $list) { $penalty += [int]$issue.Weight }
@@ -661,7 +703,7 @@ function Read-SnakeOptimizerHomeMaintenance {
                 elseif ($problems -gt 0) {
                     # O que pediu atenção está no histórico (cada etapa com o motivo); refazer a manutenção inteira, uma hora
                     # de trabalho, só para rever duas etapas seria demais.
-                    $issues += New-SnakeOptimizerHealthIssue -Id "maintenance" -Text "A última manutenção terminou com $steps pedindo atenção" -Weight 6 -Target "maintenance.history" -ButtonText "Ver"
+                    $issues += New-SnakeOptimizerHealthIssue -Id "maintenance" -Text "A última manutenção terminou com $steps pedindo atenção" -Weight 6 -Target "maintenance.history" -ButtonText "Ver" -DismissKey $date
                 }
 
                 $text = "$when ($date)"

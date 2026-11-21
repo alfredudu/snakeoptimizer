@@ -3961,6 +3961,37 @@ function Update-GuiHealthCard {
         })
         [void]$row.Children.Add($fix)
 
+        # Descartar: o ponto some e para de descontar da nota até a situação mudar. Os graves não têm o botão.
+        if (-not $issue.Severe -and $issue.DismissKey) {
+            $dismiss = New-GuiButton -Text "Descartar" -Kind "Ghost" -Tag $issue
+            $dismiss.Margin = New-Object System.Windows.Thickness (12, 0, 0, 0)
+            $dismiss.VerticalAlignment = "Center"
+            $dismiss.ToolTip = "Some daqui e deixa de contar na nota; volta se a situação mudar"
+            Set-GuiDock -Element $dismiss -Side "Right"
+            Set-GuiAutomationName -Element $dismiss -Name "Descartar: $($issue.Text)"
+            $dismiss.Add_Click({
+                param ($sender, $eventArgs)
+                try {
+                    if (Add-SnakeOptimizerDismissedIssue -Issue $sender.Tag) {
+                        $snapshot = $script:HomeLastSnapshot
+
+                        if ($null -ne $snapshot -and $null -ne $snapshot.Health) {
+                            # A nota é refeita com o que já foi lido, sem ler o PC de novo.
+                            $snapshot.Health = Get-SnakeOptimizerHealthScore -Issues @($snapshot.Health.Issues) -Unread @($snapshot.Health.Unread)
+                            Show-GuiHomeResult -Snapshot $snapshot
+                        }
+                        else {
+                            Request-GuiHomeRefresh -Force
+                        }
+                    }
+                }
+                catch {
+                    Write-Verbose "Descartar: $($_.Exception.Message)"
+                }
+            })
+            [void]$row.Children.Add($dismiss)
+        }
+
         # Um ponto grave (que limita a nota) tem o círculo vermelho; os demais, o triângulo amarelo.
         $glyph = New-GuiIcon -Name $(if ($issue.Severe) { "error-circle" } else { "warning" }) -Size 18 -Color $(if ($issue.Severe) { $script:Theme.Bad } else { $script:Theme.Warn })
         $glyph.Margin = New-Object System.Windows.Thickness (0, 0, 12, 0)
