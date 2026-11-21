@@ -2154,6 +2154,79 @@ function Invoke-SnakeOptimizerLauncherMode {
 }
 
 
+function Start-SnakeOptimizerUpdateNow {
+    <#
+    Atualizar agora: com a janela aberta, a cópia instalada não pode ser trocada (os arquivos estão em uso), e o
+    Atualizador só troca com o SnakeOptimizer fechado. Um PowerShell à parte (atualizar-agora.ps1, na pasta protegida da
+    instalação) espera esta ação terminar, fecha esta janela (como o X; depois de 30 s, à força), roda o mesmo Update do
+    Atualizador (o launcher mais novo do GitHub, ou o local sem internet) e abre o SnakeOptimizer de novo, do mesmo jeito
+    (janela ou console). Ele herda o Administrador desta janela. Tudo fica no atualizador.log.
+    #>
+    param ([Parameter(Mandatory)][string]$Root)
+
+    $url = "https://raw.githubusercontent.com/$(Get-SnakeOptimizerRepository)/main/launch.ps1"
+    $ps = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+
+    # Reabre o mesmo programa que está aberto agora: a janela (Gui) ou o menu de texto (Console).
+    $reopen = "SnakeOptimizer.Gui.ps1"
+    try {
+        $line = [string](Get-CimInstance -ClassName Win32_Process -Filter "ProcessId=$PID" -ErrorAction Stop).CommandLine
+        if ($line -match 'SnakeOptimizer\.Console\.ps1') { $reopen = "SnakeOptimizer.Console.ps1" }
+    }
+    catch { }
+
+    $helper = @'
+param ([int]$WaitPid, [string]$Root, [string]$Url, [string]$Reopen)
+$ErrorActionPreference = "Continue"
+$ps = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+$log = Join-Path $Root "atualizador.log"
+function Write-HelperLog([string]$Text) { try { Add-Content -LiteralPath $log -Value ("{0}  Atualizar agora: {1}" -f (Get-Date).ToString("yyyy-MM-dd HH:mm:ss"), $Text) -Encoding UTF8 } catch { } }
+
+Write-HelperLog "pedido pela janela; fechando o SnakeOptimizer."
+Start-Sleep -Seconds 4
+$p = $null
+try { $p = Get-Process -Id $WaitPid -ErrorAction Stop } catch { }
+if ($p) {
+    try { [void]$p.CloseMainWindow() } catch { }
+    if (-not $p.WaitForExit(30000)) {
+        Write-HelperLog "a janela nao fechou em 30 s; encerrada."
+        try { $p.Kill(); [void]$p.WaitForExit(10000) } catch { }
+    }
+}
+Start-Sleep -Seconds 2
+
+$local = Join-Path $Root "launch.ps1"
+$inner = "[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072; " +
+    "`$s = `$null; try { `$s = Invoke-RestMethod -Uri '$Url' -UseBasicParsing } catch { }; " +
+    "if (`$s) { & ([scriptblock]::Create(`$s)) -Mode Update } else { & '$local' -Mode Update }; exit `$LASTEXITCODE"
+& $ps -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -Command $inner | Out-Null
+
+$app = Join-Path $Root "app"
+$file = Join-Path $app $Reopen
+if (Test-Path -LiteralPath $file) {
+    if ($Reopen -like "*Gui.ps1") {
+        Start-Process -FilePath $ps -WorkingDirectory $app -WindowStyle Hidden -ArgumentList "-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File `"$file`" -Page app"
+    }
+    else {
+        Start-Process -FilePath $ps -WorkingDirectory $app -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$file`""
+    }
+    Write-HelperLog "SnakeOptimizer aberto de novo."
+}
+else {
+    Write-HelperLog "a copia instalada nao foi encontrada em $app; abra pelo atalho."
+}
+'@
+
+    $path = Join-Path $Root "atualizar-agora.ps1"
+    [IO.File]::WriteAllText($path, $helper, (New-Object System.Text.UTF8Encoding $true))
+
+    Start-Process -FilePath $ps -WindowStyle Hidden -WorkingDirectory $Root -ArgumentList @(
+        "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden",
+        "-File", "`"$path`"", "-WaitPid", $PID, "-Root", "`"$Root`"", "-Url", "`"$url`"", "-Reopen", $reopen
+    ) | Out-Null
+}
+
+
 function Show-SnakeOptimizerInstallation {
     <#
     Versão nova e instalação no PC. O SnakeOptimizer não é um serviço do Windows de verdade (é PowerShell, e um serviço
@@ -2206,18 +2279,17 @@ function Show-SnakeOptimizerInstallation {
     if ($upToDate) {
         Write-SnakeOptimizerStatus -Type Success -Message "A cópia instalada é a versão mais nova publicada."
     }
-    elseif ($newer -and $state.Updater) {
-        Write-SnakeOptimizerStatus -Type Warning -Message "Há versão nova. O Atualizador troca sozinho quando o SnakeOptimizer estiver fechado (em até 6 horas ou ao ligar o PC). Ou feche esta janela e abra pelo atalho: ele atualiza antes de abrir."
-    }
     elseif ($newer) {
-        Write-SnakeOptimizerStatus -Type Warning -Message "Há versão nova. Feche e abra de novo pelo link ou pelo Abrir-SnakeOptimizer.cmd (eles baixam a mais nova), ou instale no PC para atualizar sozinho."
+        Write-SnakeOptimizerStatus -Type Warning -Message "Há versão nova. Use Atualizar agora: o SnakeOptimizer fecha, troca a cópia instalada e abre de novo, já na versão nova."
     }
 
-    if ($state.Running -and $newer) {
-        Write-SnakeOptimizerStatus -Type Info -Notice -Message "Esta janela está aberta a partir da cópia instalada: a troca acontece depois que ela fechar."
+    $options = @()
+    if ($newer) {
+        $options += @{ Key = "U"; Label = "Atualizar agora"; Accent = $true
+            Description = "Fecha o SnakeOptimizer, baixa a versão nova para $($state.Root) e abre de novo em alguns segundos. Uma ação em andamento em outra janela do SnakeOptimizer adia a troca." }
     }
 
-    $options = @(
+    $options += @(
         @{ Key = "1"; Label = $(if ($state.Updater) { "Reinstalar / reparar a instalação" } else { "Instalar no PC com atualização automática" }); Accent = (-not $state.Updater)
             Description = "Cópia fixa em $($state.Root), tarefa Atualizador (SYSTEM, ao ligar o PC e a cada 6 horas), ícone na bandeja (perto do relógio) e atalhos na Área de Trabalho e no Menu Iniciar para todos os usuários." },
         @{ Key = "2"; Label = "Desinstalar do PC"; Description = "Remove o Atualizador, a manutenção automática e os atalhos. Os relatórios e o histórico ficam; a pasta do app sai quando o SnakeOptimizer estiver fechado." },
@@ -2241,7 +2313,12 @@ function Show-SnakeOptimizerInstallation {
     }
 
     try {
-        if ($answer -eq "1") {
+        if ($answer -eq "U") {
+            Start-SnakeOptimizerUpdateNow -Root $state.Root
+            Write-SnakeOptimizerStatus -Type Success -Message "O SnakeOptimizer vai fechar em alguns segundos e abrir de novo, já na versão nova. Se ele não voltar em 1 minuto, abra pelo atalho."
+            $final = New-SnakeOptimizerResult -Kind Ok -Detail "atualizando: fecha e abre de novo" -Title $title
+        }
+        elseif ($answer -eq "1") {
             Write-SnakeOptimizerStatus -Type Running -Notice -Message "Instalando..."
             $code = Invoke-SnakeOptimizerLauncherMode -Mode Install
             $final = $(if ($code -eq 0) { New-SnakeOptimizerResult -Kind Ok -Detail "instalado com atualização automática" -Title $title }

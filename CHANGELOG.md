@@ -1,5 +1,9 @@
 # Histórico de mudanças do SnakeOptimizer
 
+## 1.9.16 — 21/11/2026
+
+- **Atualizar agora:** a tela **Versão nova e instalação no PC** dizia que havia versão nova, mas a opção de reinstalar reaproveitava a cópia local, e com a janela aberta a pasta não podia ser trocada: a versão só mudava quando o Atualizador rodava sozinho. Agora, com versão nova, aparece **U = Atualizar agora**: o SnakeOptimizer fecha, baixa a versão nova e abre de novo em alguns segundos, na mesma tela. O que aconteceu fica no atualizador.log.
+
 ## 1.9.15 — 21/11/2026
 
 - **Limpeza avançada > Instalações anteriores do Windows:** a espera pela Limpeza de Disco do Windows ficava muda (até 2 horas) e parecia travada depois que a janelinha dela fechava. Agora a barra mostra há quantos minutos ela trabalha, e se ela ficar 10 minutos parada, sem usar o processador (esperando um disco que não responde, por exemplo), é encerrada e o SnakeOptimizer apaga o que sobrou direto.
