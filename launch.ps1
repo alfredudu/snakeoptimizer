@@ -361,9 +361,41 @@ function Get-LoggedOnUser {
 $AgentRunKey = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run"
 $AgentRunName = "SnakeOptimizer Monitor"
 
-function Get-AgentCommandLine([string]$Root) {
+$MonitorTask = "Monitor"
+
+function Get-MonitorFlagPath([string]$Root) { return (Join-Path $Root "monitor-todos-usuarios.flag") }
+
+function Register-MonitorTask {
+    # O icone da bandeja para todos os usuarios: tarefa "ao entrar no Windows" do grupo Usuarios, sem elevacao, uma por
+    # sessao. Antes era uma entrada em HKLM\...\Run, que antivirus (AVG) apagam por ser um PowerShell oculto na
+    # inicializacao; a tarefa tambem e recriada pelo Atualizador se sumir.
+    param ([string]$Root)
+
     $agent = Join-Path $Root "app\$AppName.Agent.ps1"
-    return "`"$(Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe')`" -NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File `"$agent`" -Machine"
+    $taskAction = New-ScheduledTaskAction -Execute (Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe") `
+        -Argument "-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File `"$agent`" -Machine" -WorkingDirectory (Join-Path $Root "app")
+    $trigger = New-ScheduledTaskTrigger -AtLogOn
+    $trigger.Delay = "PT20S"
+    $principal = New-ScheduledTaskPrincipal -GroupId "S-1-5-32-545" -RunLevel Limited
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances Parallel
+    $description = "SnakeOptimizer (Snake Tech): icone na bandeja (perto do relogio) que avisa quando o disco enche, a protecao desliga ou falta manutencao. Cada usuario pode desligar em Sobre > Monitor na bandeja."
+    $task = New-ScheduledTask -Action $taskAction -Trigger $trigger -Principal $principal -Settings $settings -Description $description
+    Register-ScheduledTask -TaskPath $TaskPath -TaskName $MonitorTask -InputObject $task -Force | Out-Null
+
+    # A entrada antiga no registro (versao 1.5.1) sai: duas formas de abrir so confundem.
+    Remove-ItemProperty -LiteralPath $AgentRunKey -Name $AgentRunName -ErrorAction SilentlyContinue
+    try { Set-Content -LiteralPath (Get-MonitorFlagPath $Root) -Value "Monitor para todos os usuarios (tarefa $TaskPath$MonitorTask)." -Encoding ASCII } catch { }
+}
+
+function Repair-MonitorTask {
+    # O Atualizador confere: instalado com o monitor para todos e a tarefa sumiu (antivirus, limpador) -> recria.
+    param ([string]$Root)
+
+    if (-not (Test-Path -LiteralPath (Get-MonitorFlagPath $Root))) { return "" }
+    $t = Get-ScheduledTask -TaskPath $TaskPath -TaskName $MonitorTask -ErrorAction SilentlyContinue
+    if ($t -and $t.State -ne "Disabled") { return "" }
+    try { Register-MonitorTask -Root $Root; return " Tarefa do icone da bandeja recriada (tinha sumido ou estava desativada)." }
+    catch { return " Nao foi possivel recriar a tarefa do icone da bandeja ($($_.Exception.Message))." }
 }
 
 function Start-AgentInUserSession {
@@ -375,9 +407,19 @@ function Start-AgentInUserSession {
     $agent = Join-Path $Root "app\$AppName.Agent.ps1"
     if (-not (Test-Path -LiteralPath $agent)) { return $false }
 
+    $running = { @(Get-CimInstance -ClassName Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
+            Where-Object { $_.CommandLine -match 'SnakeOptimizer\.Agent\.ps1' }).Count -gt 0 }
     # Ja aberto: nada a fazer.
-    if (@(Get-CimInstance -ClassName Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
-            Where-Object { $_.CommandLine -match 'SnakeOptimizer\.Agent\.ps1' }).Count -gt 0) { return $true }
+    if (& $running) { return $true }
+
+    # A tarefa do monitor (grupo Usuarios) abre nas sessoes de quem esta logado.
+    if (Get-ScheduledTask -TaskPath $TaskPath -TaskName $MonitorTask -ErrorAction SilentlyContinue) {
+        try {
+            Start-ScheduledTask -TaskPath $TaskPath -TaskName $MonitorTask -ErrorAction Stop
+            for ($i = 0; $i -lt 8; $i++) { Start-Sleep -Seconds 1; if (& $running) { return $true } }
+        }
+        catch { }
+    }
 
     # A tarefa que abre o icone NAO e apagada logo depois: apagar uma tarefa em execucao pode encerrar o que ela abriu
     # (o icone sumia). As antigas que ja terminaram saem aqui.
@@ -501,7 +543,7 @@ function Install-Machine {
     $links = @(New-AppShortcuts -Root $Root)
 
     # Icone na bandeja (perto do relogio) para todos os usuarios, ao entrar no Windows; e ja abre agora.
-    Set-ItemProperty -LiteralPath $AgentRunKey -Name $AgentRunName -Value (Get-AgentCommandLine $Root) -Type String
+    Register-MonitorTask -Root $Root
     $trayNow = Start-AgentInUserSession -Root $Root
     Write-UpdateLog $Root "Instalado (Atualizador e icone da bandeja ligados)."
 
@@ -527,6 +569,7 @@ function Uninstall-Machine {
     }
 
     Remove-ItemProperty -LiteralPath $AgentRunKey -Name $AgentRunName -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath (Get-MonitorFlagPath $Root) -Force -ErrorAction SilentlyContinue
     $appDir = Join-Path $Root "app"
     foreach ($p in @(Get-AppProcesses $appDir | Where-Object { $_.CommandLine -match 'Agent\.ps1' })) {
         Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
@@ -627,6 +670,15 @@ try {
             if (-not $UpdateInfo.Commit -and $UpdateInfo.Outcome -eq "Updated") { $text = "Atualizado (sem consultar o commit; limite do GitHub)." }
             # O icone da bandeja foi fechado para a troca: volta agora (com a versao nova).
             if ($UpdateInfo.AgentRestarted) { $text += " Icone da bandeja reaberto." }
+            # Instalado pela 1.5.1 (entrada no registro): passa para a tarefa. E recria a tarefa se algo a apagou.
+            if (-not (Test-Path -LiteralPath (Get-MonitorFlagPath $root)) -and (Test-Path -LiteralPath (Get-InstalledVersionPath $root)) -and
+                (Get-ScheduledTask -TaskPath $TaskPath -TaskName $UpdaterTask -ErrorAction SilentlyContinue)) {
+                try { Register-MonitorTask -Root $root; $text += " Icone da bandeja passou a abrir por tarefa ao entrar no Windows."; [void](Start-AgentInUserSession -Root $root) } catch { }
+            }
+            else {
+                $fixed = Repair-MonitorTask -Root $root
+                if ($fixed) { $text += $fixed; [void](Start-AgentInUserSession -Root $root) }
+            }
             Write-UpdateLog $root $text
             Write-Step $text Green
             $global:LASTEXITCODE = $(if ($UpdateInfo.Outcome -in "Updated", "UpToDate") { 0 } else { 1 })

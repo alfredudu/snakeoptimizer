@@ -1,5 +1,10 @@
 # Histórico de mudanças do SnakeOptimizer
 
+## 1.7 — 21/11/2026
+
+- O ícone da bandeja (instalação no PC) passa a abrir pela tarefa **`\SnakeOptimizer\Monitor`**, "ao entrar no Windows", para o grupo Usuários e sem elevação, no lugar da entrada em `HKLM\...\Run`. O antivírus (AVG) apagava essa entrada, por ser um PowerShell oculto na inicialização.
+- O Atualizador confere a cada execução: se a tarefa do ícone sumiu ou foi desativada, recria e reabre o ícone. As instalações feitas pela 1.5.1 passam sozinhas para a tarefa.
+
 ## 1.6 — 20/11/2026
 
 - **Inventário completo de discos** (Diagnóstico > Hardware): cada unidade com barra e % usado, livre e total; cada disco físico com modelo, serial, firmware, tipo (NVMe/SSD/HDD/USB), interface e formato provável, estado, disco de partida/sistema, partições e os contadores SMART (temperatura, desgaste, horas ligado, ligações, erros, total lido e gravado); TRIM. Salva em `.txt` (os 10 mais novos).

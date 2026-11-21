@@ -53,8 +53,12 @@ function Get-SnakeOptimizerAgentRunState {
 
     if ([string]::IsNullOrWhiteSpace($value)) {
         # Instalado no PC: a entrada para todos os usuários vale, a não ser que esta conta tenha desligado o monitor.
+        # A partir da 1.7 é a tarefa \SnakeOptimizer\Monitor (a marca fica em %ProgramData%\SnakeOptimizer); antes, HKLM\...\Run.
         $machine = [string](Get-SnakeOptimizerRegistryValueOrNull -Path $script:SnakeOptimizerAgentMachineRunKey -Name $script:SnakeOptimizerAgentRunName)
-        if ($machine -and $machine.IndexOf($script, [StringComparison]::OrdinalIgnoreCase) -ge 0 -and (Test-Path -LiteralPath $script -PathType Leaf) -and -not (Test-SnakeOptimizerAgentOptedOut)) {
+        $machineRoot = Join-Path $env:ProgramData "SnakeOptimizer"
+        $byTask = (Test-Path -LiteralPath (Join-Path $machineRoot "monitor-todos-usuarios.flag")) -and $script.StartsWith((Join-Path $machineRoot "app"), [StringComparison]::OrdinalIgnoreCase)
+        $byRun = ($machine -and $machine.IndexOf($script, [StringComparison]::OrdinalIgnoreCase) -ge 0)
+        if (($byTask -or $byRun) -and (Test-Path -LiteralPath $script -PathType Leaf) -and -not (Test-SnakeOptimizerAgentOptedOut)) {
             return "On"
         }
         return "Off"
