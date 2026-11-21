@@ -1,5 +1,11 @@
 # Histórico de mudanças do SnakeOptimizer
 
+## 1.9.10 — 21/11/2026
+
+- **E-mail com antivírus no meio:** antivírus como o AVG e o Avast interceptam a conexão segura do e-mail e trocam o certificado do servidor; na porta 465 o Windows recusa esse certificado e o envio falhava com "falha na conexão segura (SSL)". Agora, quando a porta configurada falha na conexão, o envio tenta a 2525 e a 587 (STARTTLS) do mesmo servidor. O e-mail de teste salva a porta que funcionou. Uma recusa do servidor (usuário ou senha) não troca de porta.
+- A mensagem de erro diz qual antivírus interceptou e quem assinou o certificado recusado.
+- **Área técnica:** o quadro "E-mail deste PC" só aparece de novo depois de uma mudança; repetido depois de cada teste, parecia que a tela fechava e abria.
+
 ## 1.9.9 — 21/11/2026
 
 - **Área técnica:** o e-mail de teste falhava com "Este host não é conhecido". Na janela, a caixa de cada campo vinha preenchida com "manter: mail.smtp2go.com", e esse "manter:" era gravado junto no servidor, no usuário e no remetente. A caixa agora vem só com o valor, e as configurações já gravadas com o "manter:" são consertadas ao abrir.

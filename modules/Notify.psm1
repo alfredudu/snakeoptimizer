@@ -17,17 +17,18 @@ using System.IO;
 using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Authentication;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 
 namespace SnakeOptimizer
 {
-    public class SmtpFailure : Exception
+    public class SmtpFailureV2 : Exception
     {
         public int Code;
-        public SmtpFailure(int code, string message) : base(message) { Code = code; }
+        public SmtpFailureV2(int code, string message) : base(message) { Code = code; }
     }
 
-    public static class SmtpMailer
+    public static class SmtpMailerV2
     {
         private static string ReadReply(StreamReader reader, out int code)
         {
@@ -56,7 +57,7 @@ namespace SnakeOptimizer
 
             int code;
             string reply = ReadReply(reader, out code);
-            if (code != expected && code != alternative) { throw new SmtpFailure(code, reply); }
+            if (code != expected && code != alternative) { throw new SmtpFailureV2(code, reply); }
             return reply;
         }
 
@@ -114,12 +115,29 @@ namespace SnakeOptimizer
             return m.ToString();
         }
 
+        // Quem assinou o certificado recebido na última conexão segura recusada (um antivírus que intercepta o e-mail,
+        // como o AVG, assina com o próprio nome); vazio quando o certificado foi aceito.
+        public static string RejectedIssuer = "";
+
+        // A validação continua a do Windows (cadeia e nome); a função só anota quem assinou o que foi recusado.
+        private static SslStream Secure(Stream stream, string host)
+        {
+            SslStream ssl = new SslStream(stream, false, delegate (object sender, X509Certificate certificate, X509Chain chain, SslPolicyErrors errors)
+            {
+                if (errors == SslPolicyErrors.None) { return true; }
+                RejectedIssuer = certificate != null ? certificate.Issuer : "";
+                return false;
+            });
+            ssl.AuthenticateAsClient(host, null, SslProtocols.Tls12, true);
+            return ssl;
+        }
+
         // implicitTls = SSL direto (porta 465); senão, STARTTLS (587, 2525). Sem TLS, não envia (a senha iria aberta).
         public static void Send(string host, int port, bool implicitTls, string user, string password, string from, string[] to, string message, int timeoutMs)
         {
             using (TcpClient client = new TcpClient())
             {
-                if (!client.ConnectAsync(host, port).Wait(timeoutMs)) { throw new SmtpFailure(0, "tempo esgotado ao conectar em " + host + ":" + port); }
+                if (!client.ConnectAsync(host, port).Wait(timeoutMs)) { throw new SmtpFailureV2(0, "tempo esgotado ao conectar em " + host + ":" + port); }
                 client.ReceiveTimeout = timeoutMs;
                 client.SendTimeout = timeoutMs;
 
@@ -130,8 +148,7 @@ namespace SnakeOptimizer
                 {
                     if (implicitTls)
                     {
-                        ssl = new SslStream(stream, false);
-                        ssl.AuthenticateAsClient(host, null, SslProtocols.Tls12, true);
+                        ssl = Secure(stream, host);
                         stream = ssl;
                     }
 
@@ -144,8 +161,7 @@ namespace SnakeOptimizer
                     if (!implicitTls)
                     {
                         Command(stream, reader, "STARTTLS", 220, 220);
-                        ssl = new SslStream(stream, false);
-                        ssl.AuthenticateAsClient(host, null, SslProtocols.Tls12, true);
+                        ssl = Secure(stream, host);
                         stream = ssl;
                         reader = new StreamReader(stream, Encoding.ASCII);
                         Command(stream, reader, "EHLO " + me, 250, 250);
@@ -177,7 +193,7 @@ namespace SnakeOptimizer
 
 
 function Initialize-SnakeOptimizerSmtp {
-    if ("SnakeOptimizer.SmtpMailer" -as [type]) { return $true }
+    if ("SnakeOptimizer.SmtpMailerV2" -as [type]) { return $true }
 
     try {
         Add-Type -TypeDefinition $script:SnakeOptimizerSmtpSource -ErrorAction Stop
@@ -572,10 +588,10 @@ function Get-SnakeOptimizerSmtpProblem {
     param ($ErrorRecord)
 
     $exception = $ErrorRecord.Exception
-    while ($null -ne $exception.InnerException -and -not ($exception -is [SnakeOptimizer.SmtpFailure])) { $exception = $exception.InnerException }
+    while ($null -ne $exception.InnerException -and -not ($exception -is [SnakeOptimizer.SmtpFailureV2])) { $exception = $exception.InnerException }
 
     $message = ([string]$exception.Message).Trim()
-    $code = $(if ($exception -is [SnakeOptimizer.SmtpFailure]) { [int]$exception.Code } else { 0 })
+    $code = $(if ($exception -is [SnakeOptimizer.SmtpFailureV2]) { [int]$exception.Code } else { 0 })
 
     switch ($code) {
         535 { return "usuário ou senha do SMTP recusados ($message)" }
@@ -585,13 +601,40 @@ function Get-SnakeOptimizerSmtpProblem {
     }
 
     if ($message -match '(?i)tempo esgotado|timed out|tempo limite') { return "o servidor não respondeu a tempo; confira o endereço, a porta e se a internet ou o firewall liberam a saída" }
-    if ($message -match '(?i)certificate|certificado|authentication failed because') { return "falha na conexão segura (SSL): confira a porta e o tipo de segurança" }
+
+    if ($message -match '(?i)certificate|certificado|authentication failed because|autentica') {
+        $issuer = $(try { [string][SnakeOptimizer.SmtpMailerV2]::RejectedIssuer } catch { "" })
+        if ($issuer -match '(?i)\b(AVG|Avast|Kaspersky|ESET|Bitdefender|Norton|McAfee|Sophos|Trend Micro|Avira|Panda|Fortinet|Zscaler)\b') {
+            return "o antivírus $($Matches[1]) intercepta a conexão segura do e-mail e troca o certificado do servidor (assinado por: $issuer)"
+        }
+        if ($issuer) { return "o certificado do servidor não foi aceito pelo Windows (assinado por: $issuer)" }
+        return "falha na conexão segura (SSL): $message"
+    }
+
     return $message
 }
 
 
+function Get-SnakeOptimizerSmtpRoutes {
+    # A porta configurada e, se ela falhar na conexão, as outras do mesmo servidor: a 465 (SSL direto) costuma ser
+    # interceptada por antivírus (AVG, Avast) e bloqueada por algumas redes; a 2525 e a 587 (STARTTLS) passam.
+    param ([Parameter(Mandatory)]$Config)
+
+    $routes = @([PSCustomObject]@{ Port = [int]$Config.Port; Ssl = ([string]$Config.Security -eq "SSL") })
+    foreach ($port in @(2525, 587, 465)) {
+        if (@($routes | Where-Object { $_.Port -eq $port }).Count -eq 0) { $routes += [PSCustomObject]@{ Port = $port; Ssl = ($port -eq 465) } }
+    }
+    return $routes
+}
+
+
 function Send-SnakeOptimizerEmail {
-    # Envia um relatório com a configuração dada (ou a deste PC). Devolve Sent e Problem; nunca lança erro.
+    <#
+    Envia um relatório com a configuração dada (ou a deste PC). Devolve Sent, Problem e Route ("porta 2525 (STARTTLS)"
+    quando saiu por outra porta que não a configurada); nunca lança erro. Uma falha de conexão (porta bloqueada,
+    antivírus no meio) tenta a próxima porta; uma recusa do servidor (senha, remetente) não, porque seria a mesma em
+    qualquer porta.
+    #>
     param (
         [Parameter(Mandatory)]$Report,
         $Config = $null
@@ -601,16 +644,37 @@ function Send-SnakeOptimizerEmail {
 
     try {
         if (-not (Initialize-SnakeOptimizerSmtp)) { throw "o envio de e-mail não pôde ser preparado neste PC" }
-
         $subject = Get-SnakeOptimizerEmailSubject -Report $Report
-        $message = [SnakeOptimizer.SmtpMailer]::BuildMessage([string]$Config.From, [string]$Config.FromName, [string[]]@($Config.To), $subject, (ConvertTo-SnakeOptimizerEmailHtml -Report $Report), (ConvertTo-SnakeOptimizerEmailText -Report $Report), [string]$Report.Attachment)
-        [SnakeOptimizer.SmtpMailer]::Send([string]$Config.Host, [int]$Config.Port, ([string]$Config.Security -eq "SSL"), [string]$Config.User, [string]$Config.Password, [string]$Config.From, [string[]]@($Config.To), $message, 20000)
-
-        return [PSCustomObject]@{ Sent = $true; Problem = "" }
+        $message = [SnakeOptimizer.SmtpMailerV2]::BuildMessage([string]$Config.From, [string]$Config.FromName, [string[]]@($Config.To), $subject, (ConvertTo-SnakeOptimizerEmailHtml -Report $Report), (ConvertTo-SnakeOptimizerEmailText -Report $Report), [string]$Report.Attachment)
     }
     catch {
-        return [PSCustomObject]@{ Sent = $false; Problem = (Get-SnakeOptimizerSmtpProblem -ErrorRecord $_) }
+        return [PSCustomObject]@{ Sent = $false; Problem = (Get-SnakeOptimizerSmtpProblem -ErrorRecord $_); Route = "" }
     }
+
+    $first = ""
+    $routes = @(Get-SnakeOptimizerSmtpRoutes -Config $Config)
+
+    foreach ($route in $routes) {
+        try {
+            [SnakeOptimizer.SmtpMailerV2]::RejectedIssuer = ""
+            [SnakeOptimizer.SmtpMailerV2]::Send([string]$Config.Host, [int]$route.Port, [bool]$route.Ssl, [string]$Config.User, [string]$Config.Password, [string]$Config.From, [string[]]@($Config.To), $message, 20000)
+            $via = $(if ($route.Port -ne [int]$Config.Port) { "porta $($route.Port) ($(if ($route.Ssl) { 'SSL' } else { 'STARTTLS' }))" } else { "" })
+            return [PSCustomObject]@{ Sent = $true; Problem = $first; Route = $via }
+        }
+        catch {
+            $problem = Get-SnakeOptimizerSmtpProblem -ErrorRecord $_
+            if (-not $first) { $first = "porta $($route.Port): $problem" }
+
+            # O servidor respondeu e recusou (senha, remetente, destinatário): outra porta não muda nada.
+            $exception = $_.Exception
+            while ($null -ne $exception.InnerException -and -not ($exception -is [SnakeOptimizer.SmtpFailureV2])) { $exception = $exception.InnerException }
+            if ($exception -is [SnakeOptimizer.SmtpFailureV2] -and [int]$exception.Code -ge 400) {
+                return [PSCustomObject]@{ Sent = $false; Problem = $problem; Route = "" }
+            }
+        }
+    }
+
+    return [PSCustomObject]@{ Sent = $false; Problem = "$first; as portas $((@($routes | Select-Object -Skip 1 | ForEach-Object { $_.Port })) -join ' e ') também falharam"; Route = "" }
 }
 
 
@@ -633,7 +697,9 @@ function Send-SnakeOptimizerRunEmail {
 
         $sent = Send-SnakeOptimizerEmail -Report $Report -Config $config
 
-        if ($sent.Sent) { Write-SnakeOptimizerStatus -Type Info -Message "Resumo enviado por e-mail para $(@($config.To) -join ', ')." }
+        if ($sent.Sent) {
+            Write-SnakeOptimizerStatus -Type Info -Message "Resumo enviado por e-mail para $(@($config.To) -join ', ')$(if ($sent.Route) { " (pela $($sent.Route); a porta $($config.Port) falhou)" })."
+        }
         else { Write-SnakeOptimizerStatus -Type Warning -Notice -Message "O resumo não foi enviado por e-mail: $($sent.Problem)." }
     }
     catch {
@@ -931,10 +997,17 @@ function Invoke-SnakeOptimizerTechnicianArea {
             }
         }
 
+        # O quadro "E-mail deste PC" aparece na entrada e depois de cada mudança; repetido depois de um teste, ele
+        # empurrava o resultado do teste para cima e parecia que a tela tinha fechado e aberto de novo.
+        $changed = $true
+
         while ($null -eq $result) {
             $config = Get-SnakeOptimizerEmailConfig
-            Write-SnakeOptimizerEmailConfigSummary -Config $config
-            Write-Host ""
+            if ($changed) {
+                Write-SnakeOptimizerEmailConfigSummary -Config $config
+                Write-Host ""
+            }
+            $changed = $false
 
             $options = @(
                 @{ Key = "1"; Label = "Configurar o servidor SMTP"; Description = "Servidor, porta, segurança, usuário e senha"; Accent = (-not $config.User) },
@@ -950,6 +1023,9 @@ function Invoke-SnakeOptimizerTechnicianArea {
 
             $answer = Read-SnakeOptimizerChoice -Message "O que fazer?" -Options $options -DefaultKey "X" -ShowMenu -TextPrompt "Opção (número, X = sair)"
             if ([string]::IsNullOrWhiteSpace($answer) -or $answer -eq "X") { $result = New-SnakeOptimizerResult -Kind Ok -Detail "configuração revisada"; break }
+
+            # Só o teste (4) e a exportação (6) não mudam a configuração.
+            $changed = ($answer -notin @("4", "6"))
 
             try {
                 switch ($answer) {
@@ -996,7 +1072,19 @@ function Invoke-SnakeOptimizerTechnicianArea {
                             $sample.Title = "Teste · Otimizar"
                             $sent = Send-SnakeOptimizerEmail -Report $sample -Config $config
                             Write-Progress -Activity "E-mail de teste" -Completed
-                            if ($sent.Sent) { Write-SnakeOptimizerStatus -Type Success -Message "E-mail de teste enviado para $(@($config.To) -join ', '). Confira a caixa de entrada (e o spam)." }
+                            if ($sent.Sent) {
+                                Write-SnakeOptimizerStatus -Type Success -Message "E-mail de teste enviado para $(@($config.To) -join ', '). Confira a caixa de entrada (e o spam)."
+
+                                if ($sent.Route) {
+                                    # A porta configurada falhou e outra funcionou: fica a que funcionou, para os próximos envios não
+                                    # esperarem a falha de novo.
+                                    Write-SnakeOptimizerStatus -Type Warning -Message "A porta $($config.Port) não funcionou neste PC ($($sent.Problem)). O e-mail saiu pela $($sent.Route), que fica salva para os próximos envios."
+                                    $config.Port = [int]($sent.Route -replace '^porta (\d+).*$', '$1')
+                                    $config.Security = $(if ($sent.Route -match 'SSL\)$') { "SSL" } else { "STARTTLS" })
+                                    Save-SnakeOptimizerEmailConfig -Config $config
+                                    $changed = $true
+                                }
+                            }
                             else { Write-SnakeOptimizerStatus -Type Error -Message "Não foi possível enviar: $($sent.Problem)." }
                         }
                     }
