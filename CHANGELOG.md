@@ -1,5 +1,10 @@
 # Histórico de mudanças do SnakeOptimizer
 
+## 1.8.6 — 21/11/2026
+
+- **Cartões que ficavam pulando de linha** (Início e outras páginas): com a janela perto do limite entre 3 e 4 colunas, a página alternava sozinha entre as duas. A largura era medida sem a barra de rolagem; quando a barra aparecia (por exemplo, no "Atualizando..." do Início), a área estreitava, a página mudava de colunas, a altura mudava, e o ciclo recomeçava. Agora a conta sempre reserva o espaço da barra, e o número de colunas só muda quando a janela muda de tamanho.
+- Sai o redesenho forçado da 1.8.5, que tratava como problema de redimensionar a janela o que era esse vaivém.
+
 ## 1.8.5 — 21/11/2026
 
 - Janela: ao maximizar, restaurar ou mudar o tamanho, a página se reajusta quando o tamanho para de mudar e é redesenhada inteira. No Início, os atalhos de "Por onde começar" ficavam um por linha, com a largura antiga e espaço sobrando à direita, e cartões antigos deixavam rastro na tela.

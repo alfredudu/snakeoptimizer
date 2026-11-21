@@ -4935,7 +4935,16 @@ function Get-GuiCardGrid {
 
 function Update-GuiContentWidth {
     try {
+        # A largura conta sempre com a barra de rolagem, esteja ela à vista ou não. Medida sem ela, perto do limite entre
+        # 3 e 4 colunas a página entrava num vaivém: 4 colunas cabiam sem a barra; uma mudança de altura (o "Atualizando..."
+        # do Início, um cartão que aparece) trazia a barra, a área estreitava, a página ia para 3 colunas, ficava mais
+        # alta, e assim por diante, com os cartões pulando de linha.
         $available = $pageScroll.ViewportWidth - 4
+
+        if ($pageScroll.ComputedVerticalScrollBarVisibility -ne [System.Windows.Visibility]::Visible) {
+            $available -= [System.Windows.SystemParameters]::VerticalScrollBarWidth
+        }
+
         if ($available -le 0) { return }
 
         $grid = Get-GuiCardGrid -Available $available
@@ -4959,31 +4968,6 @@ function Update-GuiContentWidth {
 }
 
 $pageScroll.Add_SizeChanged({ Update-GuiContentWidth })
-
-# Ao maximizar, restaurar ou soltar a borda da janela, a grade é conferida de novo quando o tamanho para de mudar (com a
-# largura que a área tem de fato), e a janela é redesenhada inteira: os atalhos do Início ficavam com a meia linha da
-# largura anterior (um por linha, sobrando espaço à direita), e o que estava na tela antes deixava rastros à direita.
-$script:ResizeTimer = New-Object System.Windows.Threading.DispatcherTimer
-$script:ResizeTimer.Interval = [TimeSpan]::FromMilliseconds(200)
-$script:ResizeTimer.Add_Tick({
-    $script:ResizeTimer.Stop()
-
-    try {
-        $window.UpdateLayout()
-        Update-GuiContentWidth
-        $window.Resources["CardWidth"] = [double]$script:CardWidth
-        $window.Resources["WideCardWidth"] = [double]$script:WideCardWidth
-        $contentPanel.InvalidateMeasure()
-        $window.UpdateLayout()
-        $window.InvalidateVisual()
-    }
-    catch {
-        Write-Verbose "Redesenho depois de mudar o tamanho: $($_.Exception.Message)"
-    }
-})
-
-$window.Add_SizeChanged({ $script:ResizeTimer.Stop(); $script:ResizeTimer.Start() })
-$window.Add_StateChanged({ $script:ResizeTimer.Stop(); $script:ResizeTimer.Start() })
 
 # A tela de execução tem a largura da área (menos as margens) até a das quatro colunas de cartões. Largura fixa, e não
 # alinhada pelo conteúdo: assim ela não começa estreita e cresce conforme chegam linhas compridas.
