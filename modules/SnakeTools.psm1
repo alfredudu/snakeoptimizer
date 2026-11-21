@@ -1991,11 +1991,14 @@ function Invoke-SnakeOptimizerLauncherMode {
     if (-not (Test-Path -LiteralPath $launcher)) { throw "O launcher (launch.ps1) não está na pasta $(Get-SnakeOptimizerAppRoot)." }
 
     $ps = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
-    $output = & $ps -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $launcher -Mode $Mode -NoUpdate 2>&1
-    foreach ($line in @($output)) {
-        $text = ([string]$line) -replace '^\[SnakeOptimizer\]\s*', ''
+
+    # Cada passo aparece na hora (baixar, trocar a pasta, criar as tarefas, abrir o ícone): antes a tela só recebia a
+    # saída no fim e ficava em "Em andamento", parecendo travada.
+    Read-SnakeOptimizerProcessLines -FilePath $ps -Arguments @("-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", $launcher, "-Mode", $Mode, "-NoUpdate") | ForEach-Object {
+        $text = ([string]$_) -replace '^\[SnakeOptimizer\]\s*', ''
         if ($text.Trim()) { Write-SnakeOptimizerStatus -Type Info -Notice -Message $text }
     }
+
     return $LASTEXITCODE
 }
 

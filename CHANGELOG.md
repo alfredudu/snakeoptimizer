@@ -1,5 +1,9 @@
 # Histórico de mudanças do SnakeOptimizer
 
+## 1.9.1 — 21/11/2026
+
+- **Versão nova e instalação no PC:** cada passo da instalação (baixar, trocar a pasta, criar as tarefas, abrir o ícone) aparece na hora. Antes a tela só mostrava a saída no fim e ficava em "Em andamento" sem nenhuma linha, parecendo travada.
+
 ## 1.9 — 21/11/2026
 
 - **Limpeza avançada** (Limpeza > Avançado): uma lista com caixas e o tamanho de cada item, só do que existe no PC:
