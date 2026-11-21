@@ -1,5 +1,9 @@
 # Histórico de mudanças do SnakeOptimizer
 
+## 1.9.9 — 21/11/2026
+
+- **Área técnica:** o e-mail de teste falhava com "Este host não é conhecido". Na janela, a caixa de cada campo vinha preenchida com "manter: mail.smtp2go.com", e esse "manter:" era gravado junto no servidor, no usuário e no remetente. A caixa agora vem só com o valor, e as configurações já gravadas com o "manter:" são consertadas ao abrir.
+
 ## 1.9.8 — 21/11/2026
 
 - **Resumo por e-mail (Área técnica):** no fim do Otimizar, da manutenção automática (e das tarefas do RMM) e, se ligado, das limpezas avulsas, o SnakeOptimizer manda um e-mail com o PC, a duração, o desfecho, o disco antes e depois, o espaço de cada etapa, o que pede atenção e se falta reiniciar. A manutenção automática leva o relatório do PC em anexo. Opção de só enviar quando houver problema.

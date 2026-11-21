@@ -317,10 +317,10 @@ function Get-SnakeOptimizerEmailConfig {
 
         foreach ($name in @("Enabled", "Host", "Port", "Security", "User", "From", "FromName", "Optimize", "Automatic", "Standalone", "OnlyProblems")) {
             $value = Get-SnakeOptimizerJsonValue -Object $document -Name $name
-            if ($null -ne $value) { $config.$name = $value }
+            if ($null -ne $value) { $config.$name = $(if ($value -is [string]) { ConvertTo-SnakeOptimizerCleanField -Text $value } else { $value }) }
         }
 
-        $config.To = @(@(Get-SnakeOptimizerJsonValue -Object $document -Name "To" -Default @()) | ForEach-Object { [string]$_ } | Where-Object { $_ })
+        $config.To = @(@(Get-SnakeOptimizerJsonValue -Object $document -Name "To" -Default @()) | ForEach-Object { ConvertTo-SnakeOptimizerCleanField -Text ([string]$_) } | Where-Object { $_ -match '^[^@\s]+@[^@\s]+\.[^@\s]+$' })
         $config.Password = Unprotect-SnakeOptimizerSecret -Protected ([string](Get-SnakeOptimizerJsonValue -Object $document -Name "PasswordProtected" -Default ""))
     }
     catch {
@@ -812,10 +812,19 @@ function Read-SnakeOptimizerTechnicianField {
         [AllowEmptyString()][string]$Current = ""
     )
 
-    $shown = $(if ($Current) { " (ENTER = manter: $Current)" } else { "" })
+    # "(ENTER = valor)": no console, ENTER aceita; na janela, o valor já vem escrito na caixa (GuiHost). Por isso só o
+    # valor vai entre os parênteses: qualquer outra palavra ali iria parar na caixa e seria gravada junto.
+    $shown = $(if ($Current) { " (ENTER = $Current)" } else { "" })
     $answer = Read-SnakeOptimizerText -Message "$Label$shown"
     if ([string]::IsNullOrWhiteSpace($answer)) { return $Current }
-    return $answer.Trim()
+    return (ConvertTo-SnakeOptimizerCleanField -Text $answer)
+}
+
+
+function ConvertTo-SnakeOptimizerCleanField {
+    # Tira o "manter:" que a 1.9.8 deixava na caixa da janela (e que foi gravado junto, como "manter: mail.smtp2go.com").
+    param ([AllowEmptyString()][string]$Text)
+    return ([string]$Text -replace '^\s*(manter:\s*)+', '').Trim()
 }
 
 
