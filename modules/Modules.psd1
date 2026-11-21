@@ -8,6 +8,7 @@
     Common  = @(
         'Core',
         'Console',
+        'Notify',
         'Shortcuts',
         'Shell',
         'Launcher',

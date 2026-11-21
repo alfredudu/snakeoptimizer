@@ -286,6 +286,7 @@ $promptBar = $window.FindName("PromptBar")
 $promptLabel = $window.FindName("PromptLabel")
 $promptTextRow = $window.FindName("PromptTextRow")
 $promptInput = $window.FindName("PromptInput")
+$promptSecret = $window.FindName("PromptSecret")
 $promptSend = $window.FindName("PromptSend")
 $promptButtons = $window.FindName("PromptButtons")
 $promptListScroll = $window.FindName("PromptListScroll")
@@ -2141,6 +2142,12 @@ function Show-GuiPromptBar {
             $promptTextRow.Visibility = "Visible"
             $promptInput.Text = [string]$plan.DefaultText
             $promptInput.SelectAll()
+
+            # Pergunta protegida (uma senha): o campo mascarado no lugar da caixa de texto.
+            $secret = ($null -ne $Prompt.PSObject.Properties["Secure"] -and [bool]$Prompt.Secure)
+            $promptSecret.Password = ""
+            $promptSecret.Visibility = $(if ($secret) { "Visible" } else { "Collapsed" })
+            $promptInput.Visibility = $(if ($secret) { "Collapsed" } else { "Visible" })
         }
     }
 
@@ -2172,7 +2179,7 @@ function Show-GuiPromptBar {
     if ($searchBox.IsKeyboardFocusWithin) { return }
 
     if ($plan.ShowText) {
-        [void]$promptInput.Focus()
+        if ($promptSecret.Visibility -eq "Visible") { [void]$promptSecret.Focus() } else { [void]$promptInput.Focus() }
     }
     elseif ($promptFilterRow.Visibility -eq "Visible") {
         [void]$promptFilter.Focus()
@@ -5045,7 +5052,27 @@ $runView.Add_SizeChanged({
     if ($promptBar.Visibility -eq "Visible") { Update-GuiPromptFit } else { Update-GuiSummaryHeight }
 })
 
-$promptSend.Add_Click({ Submit-GuiPrompt -Answer $promptInput.Text })
+$promptSend.Add_Click({
+    if ($promptSecret.Visibility -eq "Visible") {
+        $typed = $promptSecret.Password
+        $promptSecret.Password = ""
+        Submit-GuiPrompt -Answer $typed
+    }
+    else {
+        Submit-GuiPrompt -Answer $promptInput.Text
+    }
+})
+
+$promptSecret.Add_KeyDown({
+    param ($sender, $eventArgs)
+
+    if ($eventArgs.Key -eq "Return") {
+        $eventArgs.Handled = $true
+        $typed = $sender.Password
+        $sender.Password = ""
+        Submit-GuiPrompt -Answer $typed
+    }
+})
 $promptFilter.Add_TextChanged({ Update-GuiPromptFilter })
 
 # Do filtro, a seta para baixo vai ao primeiro item à vista da lista (como da busca para os cartões).

@@ -1668,6 +1668,7 @@ function Invoke-SnakeOptimizerUnattendedRun {
 
     $ordered = @($script:SnakeOptimizerUnattendedTasks.Keys | Where-Object { $requested -contains $_ })
     $summary = @()
+    $emailSteps = @()
     $worst = 0
     $runStarted = Get-Date
     $reportPath = ""
@@ -1703,6 +1704,14 @@ function Invoke-SnakeOptimizerUnattendedRun {
         if ($null -ne $taskSpaceBefore -and $null -ne $taskSpaceAfter) {
             $delta = [int64]$taskSpaceAfter.FreeBytes - [int64]$taskSpaceBefore.FreeBytes
             if ([Math]::Abs($delta) -ge 1MB) { $spaceText = Format-SnakeOptimizerSpaceDelta -Delta $delta }
+        }
+
+        $emailSteps += [PSCustomObject]@{
+            Name       = $(if ($definition.Label) { [string]$definition.Label } else { $key })
+            Kind       = [string]$result.Kind
+            Detail     = [string]$result.Detail
+            Duration   = Format-SnakeOptimizerDuration -Span ((Get-Date) - $started)
+            SpaceDelta = $(if ($null -ne $taskSpaceBefore -and $null -ne $taskSpaceAfter) { [int64]$taskSpaceAfter.FreeBytes - [int64]$taskSpaceBefore.FreeBytes } else { $null })
         }
 
         $summary += [PSCustomObject]@{
@@ -1741,6 +1750,20 @@ function Invoke-SnakeOptimizerUnattendedRun {
                 TotalBytes = $(if ($null -ne $runSpaceAfter) { [int64]$runSpaceAfter.TotalBytes } else { $null })
                 Items   = @($summary | ForEach-Object { [ordered]@{ Tarefa = $_.Tarefa; Resultado = [string]$_.Resultado; Espaco = [string]$_.Espaco } })
             })
+    }
+
+    # O resumo por e-mail, quando a Área técnica configurou (sem configuração, não faz nada).
+    try {
+        $kind = $(switch ($worst) { 0 { "Ok" } 1 { "Warning" } default { "Failed" } })
+        $disk = $(if ($null -ne $runSpaceBefore -and $null -ne $runSpaceAfter) { [PSCustomObject]@{ FreeBefore = [int64]$runSpaceBefore.FreeBytes; FreeAfter = [int64]$runSpaceAfter.FreeBytes; TotalBytes = [int64]$runSpaceAfter.TotalBytes } } else { $null })
+        $outcomeText = $(switch ($worst) { 0 { "Todas as tarefas terminaram bem." } 1 { "Terminou com alertas." } default { "Alguma tarefa falhou." } })
+        $report = New-SnakeOptimizerEmailReport -Title "Manutenção automática ($(Get-SnakeOptimizerAutoPlanName -Tasks ($ordered -join ',')))" -Event Automatic -Kind $kind -Outcome $outcomeText `
+            -StartedAt $runStarted -Duration (Format-SnakeOptimizerDuration -Span ((Get-Date) - $runStarted)) -Disk $disk -Steps $emailSteps `
+            -Attention (Get-SnakeOptimizerEmailAttention -Steps $emailSteps) -Reboot $reboot -Attachment $(if ($reportPath -and (Test-Path -LiteralPath $reportPath)) { $reportPath } else { "" })
+        Send-SnakeOptimizerRunEmail -Report $report
+    }
+    catch {
+        Write-Verbose "E-mail da manutenção automática: $($_.Exception.Message)"
     }
 
     return $worst

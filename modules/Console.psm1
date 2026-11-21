@@ -630,6 +630,11 @@ function Write-SnakeOptimizerActionSpace {
     Write-SnakeOptimizerKeyValue -Label "Diferença" -Value (Format-SnakeOptimizerSpaceDelta -Delta $delta)
 
     [void](Add-SnakeOptimizerSpaceLogEntry -Title $start.Title -Before $before -After $after -Reported $reported)
+
+    # O resumo por e-mail das limpezas avulsas, quando a Área técnica ligou (Notify.psm1; sem configuração, não faz nada).
+    if (Get-Command -Name Send-SnakeOptimizerStandaloneEmail -ErrorAction SilentlyContinue) {
+        Send-SnakeOptimizerStandaloneEmail -Title $start.Title -Result $Result -Before $before -After $after -StartedAt $start.At
+    }
 }
 
 
@@ -659,7 +664,7 @@ function Enter-SnakeOptimizerAction {
     $script:SnakeOptimizerActionSpace = $null
     try {
         $space = Get-SnakeOptimizerSystemDriveSpace
-        if ($null -ne $space) { $script:SnakeOptimizerActionSpace = [PSCustomObject]@{ Title = $Title; Space = $space } }
+        if ($null -ne $space) { $script:SnakeOptimizerActionSpace = [PSCustomObject]@{ Title = $Title; Space = $space; At = (Get-Date) } }
     }
     catch { $script:SnakeOptimizerActionSpace = $null }
 

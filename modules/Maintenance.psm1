@@ -1477,6 +1477,9 @@ function Invoke-SnakeOptimizerRecommendedMaintenance {
     # como uma ressalva e mostraria só a última mensagem de erro.
     $outcome = Get-SnakeOptimizerMaintenanceResult -Results $results -RestartPending $restartPending -Before $before -After $after
 
+    # O resumo por e-mail, quando a Área técnica configurou (não faz nada sem configuração).
+    Send-SnakeOptimizerOptimizeEmail -Results $results -StartedAt $startedAt -Before $before -After $after -Outcome $outcome
+
     Exit-SnakeOptimizerAction -Result $outcome
 }
 

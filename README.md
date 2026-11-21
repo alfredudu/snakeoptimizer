@@ -39,6 +39,7 @@ Ações mais usadas (lista completa com `-ListActions`):
 | `cleanup.advanced` | Limpeza avançada: Windows anterior, drivers antigos, lixeiras órfãs, sobras de fabricantes (Dell SupportAssist, HP, Lenovo, NVIDIA, AMD, Intel), logs, caches, pontos de restauração antigos, `$PatchCache$` |
 | `cleanup.profiles` | Limpar perfis de usuário: apaga pastas de outros usuários em `C:\Users` (DeleteProfile do Windows, posse, programas que seguram, ao reiniciar) |
 | `cleanup.unlock` | Apagar arquivo ou pasta presa (posse, Restart Manager, apagar ao reiniciar) |
+| `app.technician` | Área técnica, com senha: resumo das manutenções por e-mail (SMTP) |
 | `cleanup.components` | Limpar WinSxS |
 | `repair.dism-sfc` | Reparar o Windows (DISM + SFC) |
 | `updates.winget` | Atualizar programas (winget) |

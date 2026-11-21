@@ -1,5 +1,13 @@
 # Histórico de mudanças do SnakeOptimizer
 
+## 1.9.8 — 21/11/2026
+
+- **Resumo por e-mail (Área técnica):** no fim do Otimizar, da manutenção automática (e das tarefas do RMM) e, se ligado, das limpezas avulsas, o SnakeOptimizer manda um e-mail com o PC, a duração, o desfecho, o disco antes e depois, o espaço de cada etapa, o que pede atenção e se falta reiniciar. A manutenção automática leva o relatório do PC em anexo. Opção de só enviar quando houver problema.
+- **Área técnica**, escondida (só pela busca: "técnico", "smtp") e protegida por senha técnica, além de Administrador. A senha não fica em lugar nenhum: o repositório guarda só o hash dela (`config\tecnico.json`, gerado por `tools\definir-senha-tecnica.ps1`).
+- Envio direto por SSL na porta 465 (SMTP2GO por padrão; STARTTLS em 587 e 2525). A configuração fica só no PC (`%ProgramData%\SnakeOptimizer\email.json`, legível só por Administradores e SYSTEM), com a senha do SMTP cifrada pelo Windows. Exportar e importar em arquivo `.snakemail` cifrado com a senha técnica, para configurar outros PCs.
+- Modelos dos e-mails em `docs\modelos-email`.
+- **Janela:** as perguntas de senha agora mostram pontos em vez do texto.
+
 ## 1.9.7 — 21/11/2026
 
 - **Espaço antes e depois, gravado:**

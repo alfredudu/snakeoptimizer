@@ -147,7 +147,7 @@ $script:SnakeOptimizerIconNames = @{
     "cleanup.recycle-bin" = "trash"; "cleanup.downloads" = "download"
     "cleanup.components" = "package"; "cleanup.storage" = "sliders"; "cleanup.shortcuts" = "link"; "cleanup.duplicates" = "copy"
     "cleanup.leftovers" = "folder"; "cleanup.registry" = "key"; "cleanup.wipe-free" = "lock"; "cleanup.advanced" = "trash"
-    "cleanup.profiles" = "user"; "cleanup.unlock" = "lock"
+    "cleanup.profiles" = "user"; "cleanup.unlock" = "lock"; "app.technician" = "lock"
 
     "performance.boost" = "rocket"; "performance.processes" = "pulse"; "performance.memory" = "cpu"; "performance.startup" = "power"; "performance.task-manager" = "monitor"
 

@@ -443,7 +443,11 @@ function Get-SnakeOptimizerNavigation {
             -Description "Coloca o SnakeOptimizer, com o ícone dele, na Área de Trabalho ou no Menu Iniciar" -Command "New-SnakeOptimizerAppShortcut"),
         (New-SnakeOptimizerNavItem -Id "app.monitor" -Label "Monitor na bandeja" -Group "Integração com o Windows" `
             -Keywords "bandeja ícone relógio alertas avisos notificação notificações segundo plano vigiar" `
-            -Description "Um ícone perto do relógio que avisa quando o disco enche, a proteção desliga ou falta manutenção" -Command "Set-SnakeOptimizerMonitor")
+            -Description "Um ícone perto do relógio que avisa quando o disco enche, a proteção desliga ou falta manutenção" -Command "Set-SnakeOptimizerMonitor"),
+        # Fora da página: só a busca ("técnico", "smtp") chega aqui, e a tela pede a senha técnica.
+        (New-SnakeOptimizerNavItem -Id "app.technician" -Label "Área técnica" -Group "Versão e dados" -Admin -Unlisted `
+            -Keywords "técnico tecnico smtp e-mail email resumo por e-mail notificação" `
+            -Description "Só para o técnico, com senha: e-mail com o resumo das manutenções" -Command "Invoke-SnakeOptimizerTechnicianArea")
     )
 
     $script:SnakeOptimizerNavigation = @($pages)

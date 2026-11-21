@@ -540,6 +540,34 @@
       </Setter>
     </Style>
 
+    <!-- O campo de senha das perguntas protegidas (Read-Host -AsSecureString): o mesmo desenho da caixa de texto. -->
+    <Style x:Key="InputPasswordBox" TargetType="PasswordBox">
+      <Setter Property="Background" Value="{DynamicResource InsetBrush}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource InputLineBrush}"/>
+      <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+      <Setter Property="CaretBrush" Value="{DynamicResource TextBrush}"/>
+      <Setter Property="SelectionBrush" Value="{DynamicResource AccentBrush}"/>
+      <Setter Property="FontSize" Value="13.5"/>
+      <Setter Property="Padding" Value="10,7"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="PasswordBox">
+            <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="8.5">
+              <Border x:Name="Line" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="8">
+                <ScrollViewer x:Name="PART_ContentHost" Focusable="False"
+                              HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Hidden"/>
+              </Border>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsKeyboardFocused" Value="True">
+                <Setter TargetName="Line" Property="BorderBrush" Value="{DynamicResource AccentTextBrush}"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
     <!-- Barra de progresso fina, arredondada; sem percentual, uma faixa corre de um lado ao outro. A faixa tem um quarto da
          largura da barra e corre pela origem relativa da escala: o mesmo ritmo e a mesma parte do tempo à vista em
          qualquer largura de janela. Com Tag="busy", a faixa corre também por cima de uma barra com valor (a execução
@@ -971,7 +999,11 @@
                          FontSize="13.5" Margin="2,0,0,12"/>
               <DockPanel x:Name="PromptTextRow" Grid.Row="6" Margin="0,0,0,10">
                 <Button x:Name="PromptSend" DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}" Content="Enviar" Margin="10,0,0,0"/>
-                <TextBox x:Name="PromptInput" Style="{StaticResource InputTextBox}" AutomationProperties.LabeledBy="{Binding ElementName=PromptLabel}"/>
+                <Grid>
+                  <TextBox x:Name="PromptInput" Style="{StaticResource InputTextBox}" AutomationProperties.LabeledBy="{Binding ElementName=PromptLabel}"/>
+                  <PasswordBox x:Name="PromptSecret" Style="{StaticResource InputPasswordBox}" Visibility="Collapsed"
+                               AutomationProperties.LabeledBy="{Binding ElementName=PromptLabel}"/>
+                </Grid>
               </DockPanel>
               <!-- Cada botão tem 8 de margem embaixo (para quebrar em duas linhas); o -8 devolve o espaço do cartão por igual. -->
               <WrapPanel x:Name="PromptButtons" Grid.Row="7" Margin="0,0,0,-8"/>

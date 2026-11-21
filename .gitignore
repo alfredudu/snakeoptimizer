@@ -22,3 +22,8 @@ build/
 *.p12
 *.pem
 *.key
+
+# E-mail do técnico: a configuração (com a senha do SMTP) fica só em %ProgramData%\SnakeOptimizer\email.json no PC,
+# e a exportada, em .snakemail. Nenhuma das duas vai para o GitHub. (config\tecnico.json vai: é só o hash da senha técnica.)
+email.json
+*.snakemail

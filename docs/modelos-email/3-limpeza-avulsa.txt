@@ -1,0 +1,16 @@
+Assunto: [SnakeOptimizer] PC-ESTOQUE · Limpeza avançada · tudo certo · +3,2 GB
+
+SnakeOptimizer - Limpeza avançada: tudo certo
+Liberou 3,2 GB.
+
+Computador: PC-ESTOQUE
+Usuário: estoque
+Quando: 21/11/2026 14:58
+Duração: 3 min
+
+Disco do sistema
+  Antes:  22,60 GB livres (9% do disco)
+  Depois: 25,80 GB livres (11% do disco)
+  Diferença: +3,2 GB
+
+E-mail automático do SnakeOptimizer 1.9.8.
