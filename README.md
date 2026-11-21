@@ -183,6 +183,6 @@ Baixe/extraia a pasta inteira e abra **SnakeOptimizer.cmd** (janela) ou **SnakeO
 
 ## Licença
 
-Distribuído sob a licença [GNU GPLv3](LICENSE).
+Distribuído sob a licença [GNU GPLv3](LICENSE). Avisos de autoria em [NOTICE](NOTICE).
 
-© 2026 Snake Tech. Contém código © 2026 Guilherme Henn, modificado pela Snake Tech.
+© 2026 Snake Tech.
