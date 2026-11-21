@@ -2994,4 +2994,696 @@ function Get-SnakeOptimizerCleanupPageStatus {
 }
 
 
+# ---------------------------------------------------------------------------
+# Limpeza avançada
+# ---------------------------------------------------------------------------
+# O que a Limpeza personalizada não alcança: o Windows anterior, pacotes de drivers substituídos, lixeiras de contas que
+# não existem mais, sobras de fabricantes (Dell, HP, Lenovo, NVIDIA, AMD, Intel), logs do Windows, caches de aplicativos,
+# pontos de restauração antigos e o cache de atualizações do Windows Installer. Cada item sabe se medir e se limpar
+# (Measure e Clean); a tela lista os que têm algo, com o tamanho, e a pessoa marca.
+# Ficam de fora, de propósito: C:\Windows\Installer (apagar o que parece sobra quebra a desinstalação e o reparo dos
+# programas), ProgramData\Package Cache (o Visual Studio e os redistribuíveis precisam dele) e o Armazenamento Reservado.
+
+$script:SnakeOptimizerCleanmgrSlot = 7781
+
+function Get-SnakeOptimizerTreeSize {
+    # Tamanho de uma pasta inteira (ou de um arquivo), sem seguir atalhos de pasta; 0 quando não existe.
+    param ([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) { return [int64]0 }
+
+    return [int64](Get-SnakeOptimizerPathStats -Path $Path).Size
+}
+
+
+function Get-SnakeOptimizerExistingPaths {
+    # Só os caminhos que existem (pastas ou arquivos), sem repetir.
+    param ([string[]]$Paths = @())
+
+    return @($Paths | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_) } | Select-Object -Unique)
+}
+
+
+function Grant-SnakeOptimizerAdminAccess {
+    <#
+    Pastas que nem o Administrador apaga (Windows.old, a lixeira de uma conta que já foi removida): o grupo Administradores
+    vira dono e ganha controle total. O takeown pede a resposta no idioma do Windows (/D S no português, /D Y no inglês):
+    tenta as duas. O icacls vai pelo SID, que não muda com o idioma.
+    #>
+    param ([Parameter(Mandatory)][string]$Path)
+
+    foreach ($answer in @("S", "Y")) {
+        $run = Invoke-SnakeOptimizerCapture -FilePath "takeown.exe" -Arguments @("/F", $Path, "/A", "/R", "/D", $answer)
+        if ($run.ExitCode -eq 0) { break }
+    }
+
+    [void](Invoke-SnakeOptimizerCapture -FilePath "icacls.exe" -Arguments @($Path, "/grant", "*S-1-5-32-544:(OI)(CI)F", "/T", "/C", "/Q"))
+}
+
+
+function Remove-SnakeOptimizerStubbornFolder {
+    # Apaga uma pasta inteira; se faltar permissão, toma posse (Grant-SnakeOptimizerAdminAccess) e tenta de novo. Devolve
+    # quanto saiu: o tamanho de antes menos o que sobrou.
+    param ([Parameter(Mandatory)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) { return [int64]0 }
+
+    $before = Get-SnakeOptimizerTreeSize -Path $Path
+
+    try {
+        Remove-SnakeOptimizerItem -Path $Path
+    }
+    catch {
+        Write-SnakeOptimizerStatus -Type Info -Message "Sem permissão em parte de $Path; tomando posse da pasta para apagar."
+
+        try {
+            Grant-SnakeOptimizerAdminAccess -Path $Path
+            Remove-SnakeOptimizerItem -Path $Path
+        }
+        catch {
+            Write-Verbose "Remover ${Path}: $($_.Exception.Message)"
+        }
+    }
+
+    return [int64][Math]::Max(0, $before - (Get-SnakeOptimizerTreeSize -Path $Path))
+}
+
+
+function Clear-SnakeOptimizerAdvancedFolders {
+    # Esvazia as pastas (que continuam existindo) com a trava de segurança geral. Devolve Freed, Skipped e Problems.
+    param (
+        [string[]]$Paths = @(),
+        [string]$Activity = "Limpando",
+        [int]$MinAgeHours = 0
+    )
+
+    $freed = [int64]0
+    $skipped = 0
+    $problems = @()
+
+    foreach ($path in @(Get-SnakeOptimizerExistingPaths -Paths $Paths)) {
+        if (-not (Test-Path -LiteralPath $path -PathType Container)) { continue }
+
+        if (-not (Test-SnakeOptimizerCleanupTargetSafe -Path $path)) {
+            Write-SnakeOptimizerStatus -Type Error -Message "Pasta recusada por segurança: $path"
+            $problems += $path
+            continue
+        }
+
+        try {
+            $outcome = Clear-SnakeOptimizerFolderContents -Path $path -Activity $Activity -MinAgeHours $MinAgeHours
+            $freed += [int64]$outcome.Freed
+            $skipped += [int]$outcome.Skipped
+        }
+        catch {
+            Write-SnakeOptimizerStatus -Type Warning -Message "${path}: $($_.Exception.Message.TrimEnd('.'))."
+            $problems += $path
+        }
+    }
+
+    return [PSCustomObject]@{ Freed = $freed; Skipped = $skipped; Problems = @($problems) }
+}
+
+
+function Get-SnakeOptimizerFixedDriveRoots {
+    # As raízes dos discos fixos ("C:\", "D:\"...).
+    $roots = @()
+
+    try {
+        $roots = @(Get-CimInstance -ClassName Win32_LogicalDisk -Filter "DriveType=3" -ErrorAction Stop | ForEach-Object { "$($_.DeviceID)\" })
+    }
+    catch {
+        $roots = @("$($env:SystemDrive)\")
+    }
+
+    return @($roots | Where-Object { $_ -match '^[A-Za-z]:\\$' })
+}
+
+
+function Get-SnakeOptimizerOrphanRecycleBins {
+    <#
+    Lixeiras de contas que não existem mais neste PC: em cada disco, as pastas $Recycle.Bin\<SID> cujo SID não é de nenhum
+    perfil do Windows (contas apagadas, o Windows de antes de uma formatação, outro PC de onde o disco veio). O Windows não
+    mostra nem esvazia essas lixeiras, e elas não deixam apagar: a pasta é de uma conta que não existe. Também a RECYCLER,
+    a lixeira do Windows XP.
+    #>
+    $profiles = @{}
+
+    foreach ($userProfile in @(Get-CimInstance -ClassName Win32_UserProfile -ErrorAction SilentlyContinue)) {
+        if ($userProfile.SID) { $profiles[[string]$userProfile.SID] = $true }
+    }
+
+    # Sem a lista de perfis, nenhuma lixeira pode ser chamada de órfã.
+    if ($profiles.Count -eq 0) { return @() }
+
+    $found = @()
+
+    foreach ($root in @(Get-SnakeOptimizerFixedDriveRoots)) {
+        $bin = Join-Path $root '$Recycle.Bin'
+
+        foreach ($folder in @(Get-ChildItem -LiteralPath $bin -Force -Directory -ErrorAction SilentlyContinue)) {
+            if ($folder.Name -notmatch '^S-1-\d+(-\d+)+$') { continue }
+            if ($profiles.ContainsKey($folder.Name)) { continue }
+
+            $found += [PSCustomObject]@{ Path = $folder.FullName; Size = (Get-SnakeOptimizerTreeSize -Path $folder.FullName) }
+        }
+
+        $recycler = Join-Path $root "RECYCLER"
+        if (Test-Path -LiteralPath $recycler -PathType Container) {
+            $found += [PSCustomObject]@{ Path = $recycler; Size = (Get-SnakeOptimizerTreeSize -Path $recycler) }
+        }
+    }
+
+    return @($found)
+}
+
+
+function Get-SnakeOptimizerOldDriverPackages {
+    <#
+    Pacotes de drivers substituídos no repositório de drivers do Windows (DriverStore): de cada driver de terceiros (mesmo
+    .inf original, mesmo fabricante e mesma classe), fica o mais novo; os anteriores são candidatos. Um pacote em uso por
+    algum dispositivo nunca entra, mesmo sendo o mais velho. Cada um traz Inf (oemNN.inf), Name, Version, Provider,
+    Folder e Size.
+    #>
+    $drivers = @(Get-WindowsDriver -Online -ErrorAction Stop)
+    $inUse = @{}
+
+    foreach ($device in @(Get-CimInstance -ClassName Win32_PnPSignedDriver -ErrorAction SilentlyContinue)) {
+        if ($device.InfName) { $inUse[([string]$device.InfName).ToLowerInvariant()] = $true }
+    }
+
+    $versionOf = {
+        param ($driver)
+        try { [version]([string]$driver.Version) } catch { [version]"0.0" }
+    }
+
+    $groups = $drivers | Where-Object { $_.OriginalFileName } | Group-Object -Property {
+        "{0}|{1}|{2}" -f ([IO.Path]::GetFileName([string]$_.OriginalFileName)).ToLowerInvariant(), $_.ProviderName, $_.ClassName
+    }
+
+    $old = @()
+
+    foreach ($group in @($groups)) {
+        if ($group.Count -lt 2) { continue }
+
+        $sorted = @($group.Group | Sort-Object -Property @{ Expression = { & $versionOf $_ } }, @{ Expression = { $_.Date } } -Descending)
+
+        foreach ($driver in @($sorted | Select-Object -Skip 1)) {
+            $inf = ([string]$driver.Driver).ToLowerInvariant()
+            if ($inUse.ContainsKey($inf)) { continue }
+
+            $folder = Split-Path -Parent ([string]$driver.OriginalFileName)
+
+            $old += [PSCustomObject]@{
+                Inf      = [string]$driver.Driver
+                Name     = [IO.Path]::GetFileName([string]$driver.OriginalFileName)
+                Version  = [string]$driver.Version
+                Provider = [string]$driver.ProviderName
+                Folder   = $folder
+                Size     = (Get-SnakeOptimizerTreeSize -Path $folder)
+            }
+        }
+    }
+
+    return @($old)
+}
+
+
+function Get-SnakeOptimizerOldRestorePoints {
+    <#
+    Os pontos de restauração (cópias de sombra) de cada disco, menos o mais recente. Size é uma estimativa: o espaço que
+    as cópias ocupam no disco, dividido pela parte que sai. Devolve Shadows (as cópias a apagar), Size e Kept (quantas
+    ficam).
+    #>
+    $shadows = @(Get-CimInstance -ClassName Win32_ShadowCopy -ErrorAction Stop)
+    $storage = @{}
+
+    foreach ($row in @(Get-CimInstance -ClassName Win32_ShadowStorage -ErrorAction SilentlyContinue)) {
+        $volume = [regex]::Match([string]$row.Volume, 'Volume\{[0-9A-Fa-f\-]+\}').Value
+        if ($volume) { $storage[$volume.ToLowerInvariant()] = [int64]$row.UsedSpace }
+    }
+
+    $remove = @()
+    $size = [int64]0
+    $kept = 0
+
+    foreach ($group in @($shadows | Group-Object -Property VolumeName)) {
+        $sorted = @($group.Group | Sort-Object -Property InstallDate -Descending)
+        $kept++
+
+        if ($sorted.Count -lt 2) { continue }
+
+        $old = @($sorted | Select-Object -Skip 1)
+        $remove += $old
+
+        $volume = [regex]::Match([string]$group.Name, 'Volume\{[0-9A-Fa-f\-]+\}').Value.ToLowerInvariant()
+        if ($storage.ContainsKey($volume)) { $size += [int64]([double]$storage[$volume] * $old.Count / $sorted.Count) }
+    }
+
+    return [PSCustomObject]@{ Shadows = @($remove); Size = $size; Kept = $kept }
+}
+
+
+function Get-SnakeOptimizerShadowUsedBytes {
+    # Quanto as cópias de sombra (pontos de restauração) ocupam em todos os discos; -1 quando não dá para ler.
+    try {
+        $total = [int64]0
+        foreach ($row in @(Get-CimInstance -ClassName Win32_ShadowStorage -ErrorAction Stop)) { $total += [int64]$row.UsedSpace }
+        return $total
+    }
+    catch {
+        return [int64]-1
+    }
+}
+
+
+function Invoke-SnakeOptimizerCleanmgrHandlers {
+    <#
+    A Limpeza de Disco do próprio Windows (cleanmgr /sagerun), só com os itens pedidos: é ela que sabe apagar o Windows
+    anterior (Windows.old e as pastas de atualização de versão), que nem o Administrador remove direto. As marcas
+    (StateFlagsNNNN) saem do registro no fim. Espera até 2 horas.
+    #>
+    param ([Parameter(Mandatory)][string[]]$Handlers)
+
+    $base = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\VolumeCaches"
+    $flag = "StateFlags{0:D4}" -f $script:SnakeOptimizerCleanmgrSlot
+    $marked = @()
+
+    foreach ($handler in $Handlers) {
+        $key = Join-Path $base $handler
+        if (-not (Test-Path -LiteralPath $key)) { continue }
+
+        Set-ItemProperty -LiteralPath $key -Name $flag -Value 2 -Type DWord -ErrorAction Stop
+        $marked += $key
+    }
+
+    if ($marked.Count -eq 0) { return $false }
+
+    try {
+        Write-SnakeOptimizerStatus -Type Info -Message "A Limpeza de Disco do Windows está trabalhando; a janelinha dela fecha sozinha."
+        $process = Start-Process -FilePath (Join-Path $env:WINDIR "System32\cleanmgr.exe") -ArgumentList "/sagerun:$($script:SnakeOptimizerCleanmgrSlot)" -PassThru -WindowStyle Minimized
+
+        if (-not $process.WaitForExit(2 * 60 * 60 * 1000)) {
+            Write-SnakeOptimizerStatus -Type Warning -Message "A Limpeza de Disco do Windows passou de 2 horas e foi deixada terminando sozinha."
+        }
+    }
+    finally {
+        foreach ($key in $marked) { Remove-ItemProperty -LiteralPath $key -Name $flag -ErrorAction SilentlyContinue }
+    }
+
+    return $true
+}
+
+
+function Get-SnakeOptimizerAdvancedCleanupTargets {
+    <#
+    Os itens da Limpeza avançada. Selected: vem marcado. Auto: entra na manutenção automática (só o que não tem volta
+    nenhuma a perder: logs, instaladores baixados e lixeiras de contas que não existem). Warning: o que se perde, dito
+    antes de confirmar. Measure devolve o tamanho ($null = não deu para medir) e pode guardar o que achou em State; Clean
+    devolve Freed (bytes) e, quando algo não saiu, Problem.
+    #>
+    $windows = $(if (-not [string]::IsNullOrWhiteSpace($env:WINDIR)) { $env:WINDIR } else { $env:SystemRoot })
+    $drive = "$($env:SystemDrive)\"
+    $programData = $env:ProgramData
+    $local = $env:LOCALAPPDATA
+    $roaming = $env:APPDATA
+
+    $target = {
+        param ([string]$Id, [string]$Label, [string]$Description, [scriptblock]$Measure, [scriptblock]$Clean, [string]$Warning = "", [bool]$Selected = $false, [bool]$Auto = $false, [string[]]$Paths = @(), [int]$MinAgeHours = 0)
+
+        [PSCustomObject]@{
+            Id = $Id; Label = $Label; Description = $Description; Warning = $Warning; Selected = $Selected; Auto = $Auto
+            Paths = @($Paths); MinAgeHours = $MinAgeHours; Measure = $Measure; Clean = $Clean; Size = $null; State = $null
+
+            # O que a lista mostra no lugar do tamanho, quando Measure preferir ("6 pastas").
+            SizeText = ""
+        }
+    }
+
+    # Pastas que se esvaziam (a pasta fica): medir é somar, limpar é esvaziar.
+    $measureFolders = { param ($t) $total = [int64]0; foreach ($p in @(Get-SnakeOptimizerExistingPaths -Paths $t.Paths)) { $total += Get-SnakeOptimizerTreeSize -Path $p }; $total }
+    $clearFolders = {
+        param ($t)
+        $outcome = Clear-SnakeOptimizerAdvancedFolders -Paths $t.Paths -Activity $t.Label -MinAgeHours $t.MinAgeHours
+        [PSCustomObject]@{ Freed = $outcome.Freed; Skipped = $outcome.Skipped; Problem = $(if ($outcome.Problems.Count -gt 0) { "não foi possível limpar $(Join-SnakeOptimizerList -Items $outcome.Problems)" } else { "" }) }
+    }
+
+    $previousWindows = @((Join-Path $drive "Windows.old"), (Join-Path $drive '$WINDOWS.~BT'), (Join-Path $drive '$WINDOWS.~WS'), (Join-Path $drive "ESD"))
+
+    # Drivers e instaladores que os fabricantes deixam no disco (o programa deles continua instalado).
+    $vendorFolders = @(
+        (Join-Path $drive "Dell"), (Join-Path $drive "Drivers"), (Join-Path $programData "Dell\drivers"),
+        (Join-Path $drive "SWSetup"), (Join-Path $drive "SWTOOLS\DRIVERS"),
+        (Join-Path $drive "NVIDIA"), (Join-Path $programData "NVIDIA Corporation\Downloader"),
+        (Join-Path $drive "AMD"), (Join-Path $drive "Intel")
+    )
+
+    $windowsLogs = @(
+        (Join-Path $windows "Logs\CBS"), (Join-Path $windows "Logs\DISM"), (Join-Path $windows "Logs\WindowsUpdate"),
+        (Join-Path $windows "Logs\MoSetup"), (Join-Path $windows "Logs\waasmedic"), (Join-Path $windows "Logs\SIH"),
+        (Join-Path $windows "SoftwareDistribution\DataStore\Logs"), (Join-Path $windows "LiveKernelReports")
+    )
+
+    # Caches de aplicativos que não guardam login: no Teams novo, só as pastas de cache do navegador embutido de cada
+    # perfil (os cookies, que mantêm o login, ficam); no Teams clássico, as de cache; os logs do OneDrive.
+    $appCaches = @()
+    $teamsWebView = Join-Path $local "Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\EBWebView"
+
+    foreach ($webProfile in @(Get-ChildItem -LiteralPath $teamsWebView -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq "Default" -or $_.Name -like "WV2Profile_*" })) {
+        foreach ($relative in @("Cache\Cache_Data", "Code Cache", "GPUCache")) { $appCaches += (Join-Path $webProfile.FullName $relative) }
+    }
+
+    $appCaches += (Join-Path $local "Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\Logs")
+    foreach ($relative in @("Cache", "Code Cache", "GPUCache", "Service Worker\CacheStorage", "logs")) { $appCaches += (Join-Path $roaming "Microsoft\Teams\$relative") }
+    $appCaches += (Join-Path $local "Microsoft\OneDrive\logs")
+
+    $thumbFolder = Join-Path $local "Microsoft\Windows\Explorer"
+
+    return @(
+        (& $target -Id "previous-windows" -Label "Instalações anteriores do Windows" `
+            -Description "Windows.old e as pastas de atualização de versão; usa a Limpeza de Disco do próprio Windows" `
+            -Warning "Depois disso não dá mais para voltar à versão anterior do Windows." -Paths $previousWindows `
+            -Measure $measureFolders -Clean {
+                param ($t)
+                $before = [int64](Get-SnakeOptimizerSystemDriveFreeBytes)
+
+                [void](Invoke-SnakeOptimizerCleanmgrHandlers -Handlers @("Previous Installations", "Temporary Setup Files", "Windows Upgrade Log Files", "Windows ESD installation files", "Upgrade Discarded Files", "Setup Log Files", "Windows Reset Log Files"))
+
+                # O que a Limpeza de Disco deixou (ou tudo, sem ela) sai à força.
+                foreach ($path in @(Get-SnakeOptimizerExistingPaths -Paths $t.Paths)) { [void](Remove-SnakeOptimizerStubbornFolder -Path $path) }
+
+                $left = @(Get-SnakeOptimizerExistingPaths -Paths $t.Paths)
+                $after = [int64](Get-SnakeOptimizerSystemDriveFreeBytes)
+                $freed = $(if ($before -ge 0 -and $after -ge 0) { [Math]::Max([int64]0, $after - $before) } else { [int64]0 })
+
+                [PSCustomObject]@{ Freed = $freed; Skipped = 0; Problem = $(if ($left.Count -gt 0) { "ficou parte de $(Join-SnakeOptimizerList -Items $left); reinicie e tente de novo" } else { "" }) }
+            }),
+
+        (& $target -Id "old-drivers" -Label "Pacotes de drivers antigos" `
+            -Description "Versões anteriores de drivers já atualizados; fica a mais nova de cada um e nenhuma em uso sai" `
+            -Warning "Voltar um driver para a versão anterior (no Gerenciador de Dispositivos) deixa de ser possível." `
+            -Measure {
+                param ($t)
+                $t.State = @(Get-SnakeOptimizerOldDriverPackages)
+                $total = [int64]0
+                foreach ($package in $t.State) { $total += [int64]$package.Size }
+                $total
+            } -Clean {
+                param ($t)
+                $freed = [int64]0
+                $kept = @()
+                $position = 0
+
+                foreach ($package in @($t.State)) {
+                    $position++
+                    Write-Progress -Activity $t.Label -Status "$($package.Name) $($package.Version) ($position de $(@($t.State).Count))" -PercentComplete ([int](($position - 1) * 100 / [Math]::Max(1, @($t.State).Count)))
+                    $run = Invoke-SnakeOptimizerCapture -FilePath "pnputil.exe" -Arguments @("/delete-driver", $package.Inf)
+
+                    if ($run.ExitCode -eq 0) {
+                        $freed += [int64]$package.Size
+                        Write-Host "  $($package.Name) $($package.Version) ($($package.Provider)): removido."
+                    }
+                    else {
+                        $kept += "$($package.Name) $($package.Version)"
+                        Write-Host "  $($package.Name) $($package.Version): o Windows manteve (em uso ou necessário)."
+                    }
+                }
+
+                Write-Progress -Activity $t.Label -Completed
+                [PSCustomObject]@{ Freed = $freed; Skipped = $kept.Count; Problem = "" }
+            }),
+
+        (& $target -Id "orphan-recycle" -Label "Lixeiras de contas que não existem mais" -Selected $true -Auto $true `
+            -Description "Pastas `$Recycle.Bin de contas apagadas ou de outro Windows, em todos os discos; a sua Lixeira fica" `
+            -Measure {
+                param ($t)
+                $t.State = @(Get-SnakeOptimizerOrphanRecycleBins)
+                $total = [int64]0
+                foreach ($bin in $t.State) { $total += [int64]$bin.Size }
+
+                # Pastas que nem dá para abrir somam 0: a lista diz quantas são, em vez de um tamanho que não é real.
+                if ($t.State.Count -gt 0 -and $total -eq 0) {
+                    $t.SizeText = Format-SnakeOptimizerCount -Count $t.State.Count -One "pasta" -Many "pastas"
+                    [int64]1
+                }
+                else {
+                    $total
+                }
+            } -Clean {
+                param ($t)
+                $freed = [int64]0
+                $left = @()
+
+                foreach ($bin in @($t.State)) {
+                    $freed += Remove-SnakeOptimizerStubbornFolder -Path $bin.Path
+                    if (Test-Path -LiteralPath $bin.Path) { $left += $bin.Path }
+                }
+
+                [PSCustomObject]@{ Freed = $freed; Skipped = 0; Problem = $(if ($left.Count -gt 0) { "não saiu: $(Join-SnakeOptimizerList -Items $left)" } else { "" }) }
+            }),
+
+        (& $target -Id "dell-recovery" -Label "Pontos de recuperação do Dell SupportAssist" `
+            -Description "Cópias que o SupportAssist guarda para o ""Reparar o PC"" dele; chegam a dezenas de GB" `
+            -Warning "O SupportAssist perde os pontos de recuperação dele (os do Windows ficam)." `
+            -Paths @((Join-Path $programData "Dell\SARemediation\SystemRepair\Snapshots")) `
+            -Measure {
+                param ($t)
+                $t.State = @(Get-ChildItem -LiteralPath (Join-Path $env:ProgramData "Dell") -Directory -Force -Filter "SARemediation_old_*" -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+                $total = [int64]0
+                foreach ($p in @(@(Get-SnakeOptimizerExistingPaths -Paths $t.Paths) + @($t.State))) { $total += Get-SnakeOptimizerTreeSize -Path $p }
+                $total
+            } -Clean {
+                param ($t)
+                $outcome = Clear-SnakeOptimizerAdvancedFolders -Paths $t.Paths -Activity $t.Label
+                $freed = [int64]$outcome.Freed
+                foreach ($old in @($t.State)) { $freed += Remove-SnakeOptimizerStubbornFolder -Path $old }
+                [PSCustomObject]@{ Freed = $freed; Skipped = $outcome.Skipped; Problem = $(if ($outcome.Problems.Count -gt 0) { "não foi possível limpar $(Join-SnakeOptimizerList -Items $outcome.Problems)" } else { "" }) }
+            }),
+
+        (& $target -Id "vendor-installers" -Label "Instaladores de drivers dos fabricantes" -Selected $true -Auto $true `
+            -Description "O que Dell, HP, Lenovo, NVIDIA, AMD e Intel baixam e descompactam para instalar drivers; os programas deles ficam" `
+            -Paths $vendorFolders -Measure $measureFolders -Clean $clearFolders),
+
+        (& $target -Id "windows-logs" -Label "Logs e relatórios do Windows" -Selected $true -Auto $true `
+            -Description "Logs do CBS, do DISM, do Windows Update e da instalação, e relatórios de travamento do kernel" `
+            -Paths $windowsLogs -MinAgeHours 24 -Measure $measureFolders -Clean $clearFolders),
+
+        (& $target -Id "app-caches" -Label "Caches do Teams, do OneDrive e das miniaturas" -Selected $true `
+            -Description "Logins e arquivos ficam; com o Teams aberto, parte do cache fica" `
+            -Paths $appCaches -MinAgeHours 24 `
+            -Measure {
+                param ($t)
+                $total = & $measureFolders $t
+                foreach ($file in @(Get-ChildItem -LiteralPath $thumbFolder -Force -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "thumbcache_*.db" -or $_.Name -like "iconcache_*.db" })) { $total += [int64]$file.Length }
+                $total
+            }.GetNewClosure() `
+            -Clean {
+                param ($t)
+                $outcome = & $clearFolders $t
+                $freed = [int64]$outcome.Freed
+                $skipped = [int]$outcome.Skipped
+
+                # As miniaturas que o Explorador está usando ficam; ele recria as outras quando precisar.
+                foreach ($file in @(Get-ChildItem -LiteralPath $thumbFolder -Force -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "thumbcache_*.db" -or $_.Name -like "iconcache_*.db" })) {
+                    $size = [int64]$file.Length
+                    try { Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop; $freed += $size } catch { $skipped++ }
+                }
+
+                [PSCustomObject]@{ Freed = $freed; Skipped = $skipped; Problem = $outcome.Problem }
+            }.GetNewClosure()),
+
+        (& $target -Id "restore-points" -Label "Pontos de restauração antigos" `
+            -Description "Fica o mais recente de cada disco; os anteriores saem" `
+            -Warning "Só o ponto de restauração mais recente continua disponível para voltar o Windows." `
+            -Measure {
+                param ($t)
+                $t.State = Get-SnakeOptimizerOldRestorePoints
+                $(if (@($t.State.Shadows).Count -gt 0) { [Math]::Max([int64]1, [int64]$t.State.Size) } else { [int64]0 })
+            } -Clean {
+                param ($t)
+                $before = Get-SnakeOptimizerShadowUsedBytes
+                $removed = 0
+                $failed = 0
+
+                foreach ($shadow in @($t.State.Shadows)) {
+                    try { Remove-CimInstance -InputObject $shadow -ErrorAction Stop; $removed++ } catch { $failed++ }
+                }
+
+                $after = Get-SnakeOptimizerShadowUsedBytes
+                Write-Host "  Apagados: $removed. Mantidos: $($t.State.Kept) (o mais recente de cada disco)."
+                [PSCustomObject]@{
+                    Freed   = $(if ($before -ge 0 -and $after -ge 0) { [Math]::Max([int64]0, $before - $after) } else { [int64]0 })
+                    Skipped = 0
+                    Problem = $(if ($failed -gt 0) { "$(Format-SnakeOptimizerCount -Count $failed -One 'ponto de restauração não pôde ser apagado' -Many 'pontos de restauração não puderam ser apagados')" } else { "" })
+                }
+            }),
+
+        (& $target -Id "patch-cache" -Label "Cache de atualizações do Windows Installer" `
+            -Description "A pasta `$PatchCache`$, cópias de arquivos de programas que receberam atualizações" `
+            -Warning "Desinstalar uma atualização de programa (Office, Visual C++) ou repará-lo pode pedir a mídia original." `
+            -Paths @((Join-Path $windows 'Installer\$PatchCache$')) -Measure $measureFolders -Clean $clearFolders)
+    )
+}
+
+
+function Invoke-SnakeOptimizerAdvancedCleanup {
+    <#
+    Limpeza avançada: mede cada item, mostra a lista dos que têm algo (com o tamanho) e limpa o que for marcado, avisando
+    antes o que não tem volta. -Unattended (manutenção automática, modo silencioso): só os itens Auto, sem perguntas.
+    #>
+    param (
+        [switch]$Embedded,
+        [switch]$PassThru,
+        [switch]$Unattended
+    )
+
+    $title = "Limpeza avançada"
+    Enter-SnakeOptimizerAction -Title $title -Embedded:$Embedded
+
+    $result = $null
+
+    try {
+        if ($Unattended -and -not (Test-SnakeOptimizerAdministrator)) {
+            $result = New-SnakeOptimizerResult -Kind Failed -Detail "requer Administrador"
+        }
+        elseif (-not $Unattended -and -not (Test-SnakeOptimizerElevation -Reason "A limpeza avançada exige privilégios de Administrador.")) {
+            $result = New-SnakeOptimizerResult -Kind Failed -Detail "requer Administrador"
+        }
+
+        $targets = @(Get-SnakeOptimizerAdvancedCleanupTargets)
+        if ($Unattended) { $targets = @($targets | Where-Object { $_.Auto }) }
+
+        $available = @()
+
+        if ($null -eq $result) {
+            $activity = "Medindo o que pode ser liberado"
+            $position = 0
+
+            foreach ($item in $targets) {
+                $position++
+                Write-Progress -Activity $activity -Status "$($item.Label) ($position de $($targets.Count))" -PercentComplete ([int](($position - 1) * 100 / $targets.Count))
+
+                try {
+                    $item.Size = & $item.Measure $item
+                }
+                catch {
+                    Write-Verbose "Medir $($item.Label): $($_.Exception.Message)"
+                    $item.Size = $null
+                }
+
+                if ($null -ne $item.Size -and [int64]$item.Size -gt 0) { $available += $item }
+            }
+
+            Write-Progress -Activity $activity -Completed
+
+            if ($available.Count -eq 0) {
+                Write-SnakeOptimizerStatus -Type Success -Message "Não há nada acumulado nesses lugares."
+                $result = New-SnakeOptimizerResult -Kind Skipped -Detail "não há nada acumulado" -Data @{ FreedBytes = [int64]0 }
+                [void](Set-SnakeOptimizerResultView -Result $result -Headline "Nada para limpar" -Note "Windows anterior, drivers antigos, sobras de fabricantes, logs e caches já estão limpos.")
+            }
+        }
+
+        $chosen = @()
+
+        if ($null -eq $result) {
+            if ($Unattended) {
+                $chosen = @($available)
+            }
+            else {
+                Write-SnakeOptimizerStatus -Type Info -Message "Seus arquivos pessoais não são tocados. Os itens com aviso vêm desmarcados."
+                Write-Host ""
+
+                $options = @(
+                    foreach ($item in $available) {
+                        $sizeText = Format-SnakeOptimizerBytes -Bytes ([int64]$item.Size) -ZeroText "0 B"
+                        if ($item.Id -eq "restore-points") { $sizeText = "cerca de $sizeText" }
+                        if ($item.SizeText) { $sizeText = $item.SizeText }
+                        @{ Key = $item.Id; Label = "$($item.Label) · $sizeText"; Description = $(if ($item.Warning) { "$($item.Description). Atenção: $($item.Warning)" } else { $item.Description }); Selected = $item.Selected }
+                    }
+                )
+
+                $picked = @(Read-SnakeOptimizerMultiSelect -Message "Escolha o que deseja limpar" -Options $options -ConfirmLabel "Limpar")
+                $chosen = @($available | Where-Object { $picked -contains $_.Id })
+
+                if ($chosen.Count -eq 0) {
+                    Write-SnakeOptimizerStatus -Type Warning -Message "Nada foi marcado; nenhuma limpeza foi feita."
+                    $result = New-SnakeOptimizerResult -Kind Skipped -Detail "nada marcado"
+                }
+                else {
+                    $estimate = [int64]0
+                    foreach ($item in $chosen) { $estimate += [int64]$item.Size }
+
+                    $warnings = @($chosen | Where-Object { $_.Warning })
+                    Write-Host ""
+
+                    foreach ($item in $warnings) {
+                        Write-SnakeOptimizerStatus -Type Warning -Notice -Message "$($item.Label): $($item.Warning)"
+                    }
+
+                    $what = $(if ($chosen.Count -eq 1) { "o item marcado" } else { "os $($chosen.Count) itens marcados" })
+
+                    if (-not (Confirm-SnakeOptimizerAction "Limpar $what (cerca de $(Format-SnakeOptimizerBytes -Bytes $estimate -ZeroText '0 B'))?" -DefaultKey $(if ($warnings.Count -gt 0) { "N" } else { "S" }))) {
+                        Write-SnakeOptimizerStatus -Type Warning -Message "Limpeza cancelada."
+                        $result = New-SnakeOptimizerResult -Kind Skipped -Detail "cancelado pelo usuário"
+                    }
+                }
+            }
+        }
+
+        if ($null -eq $result) {
+            $freed = [int64]0
+            $skippedItems = 0
+            $problems = New-Object System.Collections.Generic.List[string]
+
+            foreach ($item in $chosen) {
+                Write-SnakeOptimizerSection -Title $item.Label
+
+                try {
+                    $outcome = & $item.Clean $item
+                    $freed += [int64]$outcome.Freed
+                    $skippedItems += [int]$outcome.Skipped
+
+                    if ($outcome.Problem) {
+                        Write-SnakeOptimizerStatus -Type Warning -Message "$($outcome.Problem)."
+                        $problems.Add($item.Label)
+                    }
+
+                    Write-SnakeOptimizerStatus -Type Success -Message "Liberou $(Format-SnakeOptimizerBytes -Bytes ([int64]$outcome.Freed) -ZeroText '0 B')."
+                }
+                catch {
+                    Write-SnakeOptimizerStatus -Type Error -Message "$($item.Label): $($_.Exception.Message.TrimEnd('.'))."
+                    $problems.Add($item.Label)
+                }
+            }
+
+            $freedText = Format-SnakeOptimizerBytes -Bytes $freed -ZeroText "0 B"
+            Write-SnakeOptimizerSection -Title "Resumo"
+            Write-SnakeOptimizerKeyValue -Label "Espaço liberado" -Value $freedText
+
+            if ($skippedItems -gt 0) {
+                Write-SnakeOptimizerStatus -Type Info -Message "$(if ($skippedItems -eq 1) { '1 item em uso ficou' } else { "$skippedItems itens em uso ficaram" }); isso é esperado."
+            }
+
+            $data = @{ FreedBytes = $freed }
+
+            if ($problems.Count -gt 0) {
+                $result = New-SnakeOptimizerResult -Kind Warning -Detail "liberou $freedText; com ressalva: $(Join-SnakeOptimizerList -Items @($problems))" -Data $data
+            }
+            else {
+                $result = New-SnakeOptimizerResult -Kind Ok -Detail "liberou $freedText" -Data $data
+            }
+        }
+    }
+    catch {
+        Write-SnakeOptimizerStatus -Type Error -Message "Ocorreu um erro na limpeza avançada: $($_.Exception.Message)"
+        $result = New-SnakeOptimizerResult -Kind Failed -Detail $_.Exception.Message
+    }
+
+    $result.Etapa = $title
+    Exit-SnakeOptimizerAction -Embedded:$Embedded -Result $result
+
+    if ($PassThru) { return $result }
+}
+
+
 Export-ModuleMember -Function *

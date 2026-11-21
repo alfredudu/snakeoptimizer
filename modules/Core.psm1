@@ -1,7 +1,7 @@
 ﻿# Núcleo: ambiente, sessão, registro, log, formatação e execução de programas nativos.
 # Nada aqui desenha cabeçalhos ou faz perguntas; isso fica em Console.psm1.
 
-$script:SnakeOptimizerBuild = "1.8.9"
+$script:SnakeOptimizerBuild = "1.9"
 
 # A trava dos arquivos de estado (Invoke-SnakeOptimizerStateLock): uma por sessão do Windows.
 $script:SnakeOptimizerStateLockName = "Local\SnakeOptimizer.State"
@@ -1617,7 +1617,7 @@ function Invoke-SnakeOptimizerNative {
         # Ferramentas que gravam em UTF-16 (SFC) deixam caracteres nulos entre as letras; eles são removidos.
         $progress = @{ Last = -1.0 }
 
-        & $FilePath @Arguments 2>&1 | ForEach-Object {
+        Read-SnakeOptimizerProcessLines -FilePath $FilePath -Arguments $Arguments | ForEach-Object {
             $line = ([string]$_) -replace "`0", ""
 
             if (Test-SnakeOptimizerEchoLine -Line $line -State $progress) { Write-Host $line }
@@ -1748,6 +1748,128 @@ function Test-SnakeOptimizerEchoLine {
 }
 
 
+function Read-SnakeOptimizerProcessLines {
+    <#
+    Executa um programa nativo e devolve a saída linha a linha, enquanto ela chega, terminando uma linha tanto no "\n"
+    quanto no "\r" sozinho. O pipe do PowerShell (& programa | ForEach-Object) só entrega uma linha no "\n": o SFC, que
+    reescreve "Verificação 9% concluída." no mesmo lugar com "\r", ficava sem nada na tela por 20 minutos e soltava
+    tudo de uma vez no fim. A codificação vem dos primeiros bytes: UTF-16 (o SFC gravando num pipe) ou a do console
+    (DISM, CHKDSK e os demais). O que sai no stderr vem depois, ao terminar. Deixa o código de saída em $LASTEXITCODE.
+    #>
+    param (
+        [Parameter(Mandatory)]
+        [string]$FilePath,
+
+        [string[]]$Arguments = @()
+    )
+
+    $command = Get-Command -Name $FilePath -CommandType Application -ErrorAction Stop | Select-Object -First 1
+
+    $info = New-Object System.Diagnostics.ProcessStartInfo
+    $info.FileName = $command.Source
+    $info.Arguments = (@($Arguments | ForEach-Object {
+                $text = [string]$_
+                if ($text -eq "" -or $text -match '[\s"]') { '"' + ($text -replace '"', '\"') + '"' } else { $text }
+            }) -join " ")
+    $info.UseShellExecute = $false
+    $info.CreateNoWindow = $true
+    $info.RedirectStandardOutput = $true
+    $info.RedirectStandardError = $true
+
+    $process = [System.Diagnostics.Process]::Start($info)
+
+    try {
+        # O stderr é lido em paralelo: um programa que enche esse pipe sem ninguém ler ficaria parado.
+        $errorText = $process.StandardError.ReadToEndAsync()
+        $stream = $process.StandardOutput.BaseStream
+        $buffer = New-Object byte[] 4096
+        $chars = New-Object char[] 8192
+        $decoder = $null
+        $first = $true
+        $line = New-Object System.Text.StringBuilder
+        $previous = [char]0
+
+        while (($count = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+            $offset = 0
+
+            if ($first) {
+                $first = $false
+
+                # UTF-16: metade dos bytes é zero (texto latino). O BOM, se vier, sai.
+                $zeros = 0
+                for ($i = 1; $i -lt $count; $i += 2) { if ($buffer[$i] -eq 0) { $zeros++ } }
+
+                if ($count -ge 2 -and $zeros -ge [Math]::Floor($count / 4)) {
+                    $decoder = [System.Text.Encoding]::Unicode.GetDecoder()
+                    if ($buffer[0] -eq 0xFF -and $buffer[1] -eq 0xFE) { $offset = 2 }
+                }
+            }
+
+            if ($null -eq $decoder) {
+                # Fora do UTF-16, a codificação só se decide no primeiro trecho com acento: UTF-8 quando ele é UTF-8 válido
+                # (winget e programas novos), senão a página OEM do Windows (DISM, CHKDSK; a 850 no Brasil). O console
+                # da janela pode estar em UTF-8 enquanto o DISM escreve em OEM: perguntar ao console quebrava os acentos.
+                $high = $false
+                for ($i = $offset; $i -lt $count; $i++) { if ($buffer[$i] -ge 0x80) { $high = $true; break } }
+
+                if ($high) {
+                    try {
+                        [void](New-Object System.Text.UTF8Encoding ($false, $true)).GetCharCount($buffer, $offset, $count - $offset)
+                        $decoder = [System.Text.Encoding]::UTF8.GetDecoder()
+                    }
+                    catch {
+                        $decoder = [System.Text.Encoding]::GetEncoding([System.Globalization.CultureInfo]::CurrentCulture.TextInfo.OEMCodePage).GetDecoder()
+                    }
+                }
+            }
+
+            if ($null -eq $decoder) {
+                # Só ASCII até aqui: igual em qualquer codificação.
+                $decoded = [System.Text.Encoding]::ASCII.GetChars($buffer, $offset, $count - $offset, $chars, 0)
+            }
+            else {
+                $decoded = $decoder.GetChars($buffer, $offset, $count - $offset, $chars, 0)
+            }
+
+            for ($i = 0; $i -lt $decoded; $i++) {
+                $char = $chars[$i]
+
+                if ($char -eq "`r" -or $char -eq "`n") {
+                    # "\r\n" é uma quebra só.
+                    if (-not ($char -eq "`n" -and $previous -eq "`r")) {
+                        $line.ToString()
+                        [void]$line.Clear()
+                    }
+                }
+                elseif ($char -ne [char]0) {
+                    [void]$line.Append($char)
+                }
+
+                $previous = $char
+            }
+        }
+
+        if ($line.Length -gt 0) { $line.ToString() }
+
+        $process.WaitForExit()
+
+        foreach ($errorLine in ([string]$errorText.Result -split "\r?\n")) {
+            if ($errorLine.Length -gt 0) { $errorLine }
+        }
+
+        $global:LASTEXITCODE = $process.ExitCode
+    }
+    finally {
+        # Se quem lê parar no meio (o pipeline foi interrompido), o programa não fica rodando sozinho.
+        if (-not $process.HasExited) {
+            try { $process.Kill() } catch { Write-Verbose "Encerrar $($FilePath): $($_.Exception.Message)" }
+        }
+
+        $process.Dispose()
+    }
+}
+
+
 function Invoke-SnakeOptimizerCapture {
     <#
     Executa um programa nativo e devolve ExitCode, Lines e Text. Com -Echo as linhas também aparecem na tela
@@ -1781,7 +1903,7 @@ function Invoke-SnakeOptimizerCapture {
 
     $global:LASTEXITCODE = 0
 
-    & $FilePath @Arguments 2>&1 | ForEach-Object {
+    Read-SnakeOptimizerProcessLines -FilePath $FilePath -Arguments $Arguments | ForEach-Object {
         $line = ([string]$_) -replace "`0", ""
         $lines.Add($line)
 

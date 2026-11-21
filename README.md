@@ -36,6 +36,7 @@ Ações mais usadas (lista completa com `-ListActions`):
 | `maintenance.checkup` | Verificar o PC |
 | `performance.boost` | Acelerar agora |
 | `cleanup.quick` | Limpeza rápida |
+| `cleanup.advanced` | Limpeza avançada: Windows anterior, drivers antigos, lixeiras órfãs, sobras de fabricantes (Dell SupportAssist, HP, Lenovo, NVIDIA, AMD, Intel), logs, caches, pontos de restauração antigos, `$PatchCache$` |
 | `cleanup.components` | Limpar WinSxS |
 | `repair.dism-sfc` | Reparar o Windows (DISM + SFC) |
 | `updates.winget` | Atualizar programas (winget) |

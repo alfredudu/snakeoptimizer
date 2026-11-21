@@ -1,5 +1,20 @@
 # Histórico de mudanças do SnakeOptimizer
 
+## 1.9 — 21/11/2026
+
+- **Limpeza avançada** (Limpeza > Avançado): uma lista com caixas e o tamanho de cada item, só do que existe no PC:
+  - **Instalações anteriores do Windows** (Windows.old, `$WINDOWS.~BT`, `$WINDOWS.~WS`, `ESD`), pela Limpeza de Disco do próprio Windows; o que ela deixar sai tomando posse da pasta.
+  - **Pacotes de drivers antigos** no DriverStore: fica a versão mais nova de cada driver, e nenhum em uso sai (`pnputil`).
+  - **Lixeiras de contas que não existem mais** (`$Recycle.Bin\<SID>` de contas apagadas ou de outro Windows, e a `RECYCLER`), em todos os discos, tomando posse da pasta. A sua Lixeira fica.
+  - **Pontos de recuperação do Dell SupportAssist** (`SARemediation`, que chega a dezenas de GB).
+  - **Instaladores de drivers dos fabricantes**: Dell, HP (`C:\SWSetup`), Lenovo, NVIDIA, AMD e Intel.
+  - **Logs do Windows** (CBS, DISM, Windows Update, instalação, travamentos do kernel).
+  - **Caches do Teams, do OneDrive e das miniaturas**, sem perder logins.
+  - **Pontos de restauração antigos** (fica o mais recente de cada disco) e o **cache `$PatchCache$`** do Windows Installer.
+  - Os itens que tiram uma forma de voltar atrás vêm desmarcados, e o aviso aparece antes de confirmar.
+- Manutenção automática completa (semanal) e modo silencioso: tarefa nova `limpeza-avancada`, só com o que não tem nada a perder (logs, instaladores de fabricantes e lixeiras órfãs).
+- **SFC com o percentual na tela:** o SFC reescreve "Verificação 9% concluída." na mesma linha, e a janela só recebia a saída dele no fim, parecendo travada por 20 minutos. A saída dos programas agora é lida no momento em que chega, e o percentual aparece nos Detalhes técnicos e na barra. Os acentos do DISM também saem certos.
+
 ## 1.8.9 — 21/11/2026
 
 - **Detalhes técnicos sem os vãos em branco:** no DISM, no SFC e nos outros programas com barra de progresso, cada atualização da barra vem com linhas vazias, e as das atualizações escondidas (a tela mostra a barra de 10 em 10%) ficavam: 15 a 20 linhas em branco entre um percentual e o seguinte. Agora, durante a barra, as linhas vazias não aparecem, e fora dela várias seguidas viram uma. Na janela, a barra nova substitui a anterior no mesmo lugar. Vale para todas as telas.

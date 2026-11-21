@@ -1244,6 +1244,7 @@ function Invoke-SnakeOptimizerDnsFlush {
 $script:SnakeOptimizerUnattendedTasks = [ordered]@{
     "ponto-restauracao" = @{ Label = "Criar ponto de restauração"; Command = "Invoke-SnakeOptimizerRestorePoint"; Arguments = @{ Embedded = $true } }
     "limpeza-rapida"    = @{ Label = "Limpeza rápida (temporários e caches; não esvazia a Lixeira)"; Command = "Invoke-SnakeOptimizerQuickCleanup"; Arguments = @{ Embedded = $true; SkipRecycleBin = $true } }
+    "limpeza-avancada"  = @{ Label = "Limpeza avançada segura (logs do Windows, instaladores de drivers dos fabricantes e lixeiras de contas que não existem mais)"; Command = "Invoke-SnakeOptimizerAdvancedCleanup"; Arguments = @{ Embedded = $true; Unattended = $true } }
     "winsxs"            = @{ Label = "Limpar componentes do Windows (WinSxS)"; Command = "Invoke-SnakeOptimizerComponentCleanup"; Arguments = @{ Embedded = $true } }
     "dism"              = @{ Label = "DISM: verificar e restaurar a imagem do Windows"; Command = "Invoke-SnakeOptimizerDism"; Arguments = @{ Embedded = $true } }
     "sfc"               = @{ Label = "SFC: verificar arquivos do sistema"; Command = "Invoke-SnakeOptimizerSfc"; Arguments = @{ Embedded = $true } }
@@ -1266,7 +1267,7 @@ $script:SnakeOptimizerAutoHistoryMax = 60
 # semanal, com ponto de restauração antes e os reparos do Windows.
 $script:SnakeOptimizerAutoPlans = [ordered]@{
     leve     = @{ Name = "Manutencao-Diaria"; Label = "leve"; Tasks = "limpeza-rapida,dns,atualizacoes,verificar" }
-    completa = @{ Name = "Manutencao-Semanal"; Label = "completa"; Tasks = "ponto-restauracao,limpeza-rapida,winsxs,dism-sfc,atualizacoes,hora,dns,discos,verificar" }
+    completa = @{ Name = "Manutencao-Semanal"; Label = "completa"; Tasks = "ponto-restauracao,limpeza-rapida,limpeza-avancada,winsxs,dism-sfc,atualizacoes,hora,dns,discos,verificar" }
 }
 $script:SnakeOptimizerAutoTaskPath = "\SnakeOptimizer\"
 
@@ -1832,7 +1833,7 @@ function Show-SnakeOptimizerAutoMaintenance {
     $full = $script:SnakeOptimizerAutoPlans.completa.Tasks
     Write-SnakeOptimizerStatus -Type Info -Message "Roda sozinho, em segundo plano, como o sistema: sem janela e sem perguntas. Nunca reinicia o PC (avisa no histórico quando precisa). No notebook, só na tomada."
     Write-SnakeOptimizerKeyValue -Label "Leve (diária)" -Value "limpeza rápida, cache DNS, atualizações do Windows e relatório" -LabelWidth 22
-    Write-SnakeOptimizerKeyValue -Label "Completa (semanal)" -Value "ponto de restauração, limpeza, WinSxS, DISM + SFC, atualizações, hora, DNS e relatório" -LabelWidth 22
+    Write-SnakeOptimizerKeyValue -Label "Completa (semanal)" -Value "ponto de restauração, limpeza, limpeza avançada segura, WinSxS, DISM + SFC, atualizações, hora, DNS, discos e relatório" -LabelWidth 22
 
     # Situação atual.
     Write-SnakeOptimizerSection -Title "Agendamento"

@@ -212,6 +212,9 @@ function Get-SnakeOptimizerNavigation {
         (New-SnakeOptimizerNavItem -Id "cleanup.registry" -Label "Limpar o registro" -Group "Avançado" `
             -Keywords "registro regedit chaves inválidas quebradas órfãs erros do registro limpador" `
             -Description "Só referências quebradas a programas e arquivos que não existem mais; com backup e desfazer" -Command "Invoke-SnakeOptimizerRegistryCleanup"),
+        (New-SnakeOptimizerNavItem -Id "cleanup.advanced" -Label "Limpeza avançada" -Group "Avançado" -Admin -Accent `
+            -Keywords "windows.old instalação anterior versão anterior drivers antigos driverstore pnputil lixeira órfã recycle.bin recycler dell supportassist remediation sarremediation hp swsetup lenovo swtools nvidia amd intel instaladores logs cbs dism teams onedrive miniaturas thumbcache pontos de restauração sombra vss patchcache installer cleanmgr limpeza de disco" `
+            -Description "Windows anterior, drivers antigos, lixeiras órfãs, sobras da Dell e de outros fabricantes, logs, caches e pontos de restauração antigos" -Command "Invoke-SnakeOptimizerAdvancedCleanup"),
         (New-SnakeOptimizerNavItem -Id "cleanup.components" -Label "Limpar componentes do Windows (WinSxS)" -Group "Avançado" -Admin `
             -Keywords "winsxs dism component store atualizações antigas espaço" `
             -Description "Remove versões antigas de componentes substituídos por atualizações (DISM)" -Command "Invoke-SnakeOptimizerComponentCleanup"),
