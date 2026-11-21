@@ -4935,15 +4935,13 @@ function Get-GuiCardGrid {
 
 function Update-GuiContentWidth {
     try {
-        # A largura conta sempre com a barra de rolagem, esteja ela à vista ou não. Medida sem ela, perto do limite entre
-        # 3 e 4 colunas a página entrava num vaivém: 4 colunas cabiam sem a barra; uma mudança de altura (o "Atualizando..."
-        # do Início, um cartão que aparece) trazia a barra, a área estreitava, a página ia para 3 colunas, ficava mais
-        # alta, e assim por diante, com os cartões pulando de linha.
-        $available = $pageScroll.ViewportWidth - 4
-
-        if ($pageScroll.ComputedVerticalScrollBarVisibility -ne [System.Windows.Visibility]::Visible) {
-            $available -= [System.Windows.SystemParameters]::VerticalScrollBarWidth
-        }
+        # A largura sai da área inteira (ActualWidth), com o espaço da barra de rolagem sempre reservado, e nunca do que
+        # sobra ao lado da barra (ViewportWidth). Medida pela barra, perto do limite entre 3 e 4 colunas a página entrava
+        # num vaivém: 4 colunas cabiam sem a barra; uma mudança de altura trazia a barra, a área estreitava, a página ia
+        # para 3 colunas, a altura mudava, a barra sumia, e os cartões ficavam pulando de linha (Início, Manutenção, Rede).
+        $available = $pageScroll.ActualWidth - $pageScroll.Padding.Left - $pageScroll.Padding.Right -
+            $pageScroll.BorderThickness.Left - $pageScroll.BorderThickness.Right -
+            [System.Windows.SystemParameters]::VerticalScrollBarWidth - 4
 
         if ($available -le 0) { return }
 
@@ -4983,10 +4981,6 @@ function Update-GuiRunViewWidth {
 }
 
 $runView.Parent.Add_SizeChanged({ Update-GuiRunViewWidth })
-$pageScroll.Add_ScrollChanged({
-    param ($sender, $eventArgs)
-    if ($eventArgs.ViewportWidthChange -ne 0) { Update-GuiContentWidth }
-})
 
 # O resumo que é o conteúdo da tela acompanha a altura da janela; a pergunta continua inteira à vista.
 $runView.Add_SizeChanged({

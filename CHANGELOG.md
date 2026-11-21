@@ -1,5 +1,9 @@
 # Histórico de mudanças do SnakeOptimizer
 
+## 1.8.8 — 21/11/2026
+
+- Os cartões das páginas **Manutenção** e **Rede** continuavam pulando de linha. A 1.8.6 ainda dependia de a barra de rolagem estar à vista, e essa informação podia chegar atrasada. Agora a largura sai da área inteira da página, com o espaço da barra sempre reservado, e não depende mais dela.
+
 ## 1.8.7 — 21/11/2026
 
 - A janela (canto da barra lateral), o relatório e o backup mostram a versão deste histórico ("Build 1.8.7"). Antes mostravam "Build 3.69", a numeração antiga da base do código.
