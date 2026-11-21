@@ -1,5 +1,10 @@
 # Histórico de mudanças do SnakeOptimizer
 
+## 1.9.12 — 21/11/2026
+
+- **Ignorar programas no winget:** a lista de Atualizar programas (winget), também no Otimizar, ganhou **Ignorar programas**. Os marcados (um driver ODBC, um agente que só atualiza sem Administrador) somem da lista, ficam fora do **Atualizar todos** e deixam de contar como desatualizados no Verificar o PC e no monitor da bandeja. A lista é do PC (`%ProgramData%\SnakeOptimizer\winget-ignorados.json`).
+- Nova tela **Atualizações > Programas ignorados no winget**: mostra os ignorados, desde quando, e desmarcar um faz ele voltar a aparecer.
+
 ## 1.9.11 — 21/11/2026
 
 - **Área técnica > Importar:** abre a janela "Abrir" do Windows para escolher o `.snakemail` (começa onde já houver um, na Área de Trabalho ou em Downloads), em vez de pedir o caminho digitado.

@@ -1195,6 +1195,95 @@ function Write-SnakeOptimizerWingetUpgradeList {
 }
 
 
+function Get-SnakeOptimizerWingetIgnorePath {
+    # Em ProgramData (do PC, não do usuário): o Otimizar, a tela de atualizações, o monitor e o Verificar o PC leem a mesma lista.
+    $root = Join-Path $env:ProgramData "SnakeOptimizer"
+    if (-not (Test-Path -LiteralPath $root)) { [void](New-Item -Path $root -ItemType Directory -Force) }
+    return (Join-Path $root "winget-ignorados.json")
+}
+
+
+function Get-SnakeOptimizerWingetIgnored {
+    # Os programas que não devem aparecer como atualização pendente: Id, Nome e Desde.
+    try {
+        $state = Read-SnakeOptimizerStateFile -Path (Get-SnakeOptimizerWingetIgnorePath)
+        if ($null -eq $state.Document) { return @() }
+        return @(@($state.Document) | Where-Object { $_ -and $_.Id } | ForEach-Object {
+                [PSCustomObject]@{ Id = [string]$_.Id; Nome = [string](Get-SnakeOptimizerJsonValue -Object $_ -Name "Nome" -Default $_.Id); Desde = [string](Get-SnakeOptimizerJsonValue -Object $_ -Name "Desde" -Default "") }
+            })
+    }
+    catch {
+        return @()
+    }
+}
+
+
+function Save-SnakeOptimizerWingetIgnored {
+    param ([AllowEmptyCollection()][object[]]$Entries = @())
+
+    # Um Id repetido fica com a primeira entrada (a de quando foi ignorado pela primeira vez).
+    $seen = @{}
+    $list = @(foreach ($entry in @($Entries | Where-Object { $_ -and $_.Id })) {
+            $key = ([string]$entry.Id).ToLowerInvariant()
+            if ($seen.ContainsKey($key)) { continue }
+            $seen[$key] = $true
+            [ordered]@{ Id = [string]$entry.Id; Nome = [string]$entry.Nome; Desde = [string]$entry.Desde }
+        })
+    Write-SnakeOptimizerStateJson -Path (Get-SnakeOptimizerWingetIgnorePath) -InputObject $list -AsList
+}
+
+
+function Remove-SnakeOptimizerWingetIgnoredPackages {
+    # A lista do winget sem os ignorados (para contar o que está pendente de verdade).
+    param ([AllowEmptyCollection()][object[]]$Packages = @())
+
+    $ids = @(Get-SnakeOptimizerWingetIgnored | ForEach-Object { $_.Id })
+    if ($ids.Count -eq 0) { return @($Packages) }
+    return @($Packages | Where-Object { $ids -notcontains [string]$_.Id })
+}
+
+
+function Invoke-SnakeOptimizerWingetIgnoreManager {
+    <#
+    Os programas ignorados nas atualizações do winget: todos vêm marcados; desmarcar um faz ele voltar a aparecer na
+    lista de atualizações (e na contagem de desatualizados do Início, do monitor e do Verificar o PC).
+    #>
+    $title = "Programas ignorados no winget"
+    Enter-SnakeOptimizerAction -Title $title
+
+    $ignored = @(Get-SnakeOptimizerWingetIgnored)
+
+    if ($ignored.Count -eq 0) {
+        Write-SnakeOptimizerStatus -Type Info -Message "Nenhum programa está sendo ignorado. Para ignorar um, use Ignorar programas na lista de Atualizar programas (winget) ou no Otimizar."
+        Exit-SnakeOptimizerAction -Result (New-SnakeOptimizerResult -Kind Ok -Detail "nenhum programa ignorado")
+        return
+    }
+
+    Write-SnakeOptimizerStatus -Type Info -Message "Estes programas não aparecem nas atualizações nem contam como desatualizados. Desmarque os que devem voltar a aparecer."
+    $options = @($ignored | ForEach-Object { @{ Key = $_.Id; Label = $_.Nome; Description = "$($_.Id)$(if ($_.Desde) { " · ignorado desde $($_.Desde)" })"; Selected = $true } })
+    $kept = Read-SnakeOptimizerMultiSelect -Message "Continuar ignorando" -Options $options -AllowNone -NoSelectAll -ConfirmLabel "Salvar" -CancelLabel "Voltar"
+
+    if ($null -eq $kept) {
+        Exit-SnakeOptimizerAction -Result (New-SnakeOptimizerResult -Kind Skipped -Detail "nada mudou")
+        return
+    }
+
+    $back = @($ignored | Where-Object { @($kept) -notcontains $_.Id })
+    Save-SnakeOptimizerWingetIgnored -Entries @($ignored | Where-Object { @($kept) -contains $_.Id })
+
+    if ($back.Count -gt 0) {
+        Write-SnakeOptimizerStatus -Type Success -Message "Voltam a aparecer nas atualizações: $(Join-SnakeOptimizerList -Items @($back | ForEach-Object { $_.Nome }))."
+        $result = New-SnakeOptimizerResult -Kind Ok -Detail "$(Format-SnakeOptimizerCount -Count $back.Count -One 'programa voltou' -Many 'programas voltaram') a aparecer"
+    }
+    else {
+        Write-SnakeOptimizerStatus -Type Info -Message "Nada mudou."
+        $result = New-SnakeOptimizerResult -Kind Ok -Detail "nada mudou"
+    }
+
+    Exit-SnakeOptimizerAction -Result $result
+}
+
+
 function Get-SnakeOptimizerWingetUpgradePlan {
     <#
     Coleta a decisão do usuário sem instalar nada, para que o Otimizar possa perguntar tudo antes da
@@ -1249,13 +1338,30 @@ function Get-SnakeOptimizerWingetUpgradePlan {
         }
     }
 
+    # Os ignorados (Ignorar programas, abaixo) saem da lista: não aparecem nem entram no "Atualizar todos".
+    $readable = ($available.Count -gt 0)
+    $ignoredIds = @(Get-SnakeOptimizerWingetIgnored | ForEach-Object { $_.Id })
+    $hidden = @($available | Where-Object { $ignoredIds -contains [string]$_.Id })
+    $available = @($available | Where-Object { $ignoredIds -notcontains [string]$_.Id })
+
+    if ($readable -and $available.Count -eq 0) {
+        Write-Host ""
+        Write-SnakeOptimizerStatus -Type Success -Message "Os programas estão em dia; $(Format-SnakeOptimizerCount -Count $hidden.Count -One 'programa ignorado não aparece' -Many 'programas ignorados não aparecem') ($(Join-SnakeOptimizerList -Items @($hidden | ForEach-Object { [string]$_.Nome })))."
+        Write-SnakeOptimizerStatus -Type Info -Message "Para voltar a mostrar: Atualizações > Programas ignorados no winget."
+        return [PSCustomObject]@{ Action = "NoUpdates"; Ids = @(); Packages = @() }
+    }
+
     Write-Host ""
 
     if ($available.Count -gt 0) {
         Write-SnakeOptimizerWingetUpgradeList -Packages $available
+        if ($hidden.Count -gt 0) {
+            Write-SnakeOptimizerStatus -Type Info -Message "Ignorados (não aparecem): $(Join-SnakeOptimizerList -Items @($hidden | ForEach-Object { [string]$_.Nome })). Para voltar a mostrar: Atualizações > Programas ignorados no winget."
+        }
         $options = @(
             @{ Key = "S"; Label = "Atualizar todos ($($available.Count))"; Accent = $true },
             @{ Key = "E"; Label = "Escolher quais atualizar"; Description = "marque os programas na lista" },
+            @{ Key = "I"; Label = "Ignorar programas"; Description = "os que não devem ser atualizados somem da lista e deixam de contar como pendentes" },
             @{ Key = "N"; Label = "Não atualizar"; Exit = $true }
         )
     }
@@ -1279,7 +1385,7 @@ function Get-SnakeOptimizerWingetUpgradePlan {
 
     while ($true) {
         try {
-            $choice = Read-SnakeOptimizerChoice -Message "O que deseja atualizar?" -TextPrompt "Digite S, E ou N" -ShowMenu -Options $options
+            $choice = Read-SnakeOptimizerChoice -Message "O que deseja atualizar?" -TextPrompt $(if ($available.Count -gt 0) { "Digite S, E, I ou N" } else { "Digite S, E ou N" }) -ShowMenu -Options $options
         }
         catch {
             Write-SnakeOptimizerStatus -Type Info -Message "Sem resposta: nenhum programa será atualizado."
@@ -1292,6 +1398,44 @@ function Get-SnakeOptimizerWingetUpgradePlan {
 
         if ($choice -eq "S") {
             return [PSCustomObject]@{ Action = "All"; Ids = @(); Packages = $available }
+        }
+
+        if ($choice -eq "I" -and $available.Count -gt 0) {
+            $ignoreOptions = @(
+                foreach ($package in $available) {
+                    $versions = $(if ([string]::IsNullOrWhiteSpace([string]$package.Disponivel)) { [string]$package.Versao } else { "$($package.Versao) para $($package.Disponivel)" })
+                    @{ Key = $package.Id; Label = $package.Nome; Description = "$($package.Id) · $versions" }
+                }
+            )
+
+            $toIgnore = Read-SnakeOptimizerMultiSelect -Message "Quais programas ignorar?" -Options $ignoreOptions -NoSelectAll -ConfirmLabel "Ignorar" -CancelLabel "Voltar"
+            if ($null -eq $toIgnore -or @($toIgnore).Count -eq 0) { continue }
+
+            $today = (Get-Date).ToString("dd/MM/yyyy")
+            $new = @($available | Where-Object { @($toIgnore) -contains [string]$_.Id } | ForEach-Object { [PSCustomObject]@{ Id = [string]$_.Id; Nome = [string]$_.Nome; Desde = $today } })
+
+            try {
+                Save-SnakeOptimizerWingetIgnored -Entries (@(Get-SnakeOptimizerWingetIgnored) + $new)
+            }
+            catch {
+                Write-SnakeOptimizerStatus -Type Error -Message "Não foi possível gravar a lista de ignorados: $($_.Exception.Message)"
+                continue
+            }
+
+            Write-SnakeOptimizerStatus -Type Success -Message "Ignorados a partir de agora: $(Join-SnakeOptimizerList -Items @($new | ForEach-Object { $_.Nome })). Para voltar a mostrar: Atualizações > Programas ignorados no winget."
+            $available = @($available | Where-Object { @($toIgnore) -notcontains [string]$_.Id })
+
+            if ($available.Count -eq 0) {
+                Write-SnakeOptimizerStatus -Type Success -Message "Não sobrou nada para atualizar."
+                return [PSCustomObject]@{ Action = "NoUpdates"; Ids = @(); Packages = @() }
+            }
+
+            # A lista e o "Atualizar todos (N)" com o que sobrou.
+            Write-Host ""
+            Write-SnakeOptimizerWingetUpgradeList -Packages $available
+            $options[0] = @{ Key = "S"; Label = "Atualizar todos ($($available.Count))"; Accent = $true }
+            Write-Host ""
+            continue
         }
 
         if ($available.Count -gt 0) {

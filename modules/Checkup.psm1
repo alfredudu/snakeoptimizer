@@ -217,6 +217,12 @@ function Get-SnakeOptimizerCheckupPrograms {
         return (New-SnakeOptimizerCheckupFinding -Id "programs" -Label "Programas desatualizados" -Value "não foi possível ler" -Level Info -Target "updates.winget" -Unread $true)
     }
 
+    # Os que o técnico mandou ignorar não contam como pendentes.
+    $available = @(Remove-SnakeOptimizerWingetIgnoredPackages -Packages $available)
+    if ($available.Count -eq 0) {
+        return (New-SnakeOptimizerCheckupFinding -Id "programs" -Label "Programas desatualizados" -Value "nenhum (fora os ignorados)" -Level Ok)
+    }
+
     return (New-SnakeOptimizerCheckupFinding -Id "programs" -Label "Programas desatualizados" -Value (Format-SnakeOptimizerCount -Count $available.Count -One "programa" -Many "programas") -Level Warn `
             -Target "updates.winget" -Advice "atualize em Atualizações > Atualizar programas (winget)")
 }

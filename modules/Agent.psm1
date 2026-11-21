@@ -585,7 +585,7 @@ function Get-SnakeOptimizerAgentReading {
 
                 if (Test-SnakeOptimizerWingetNoUpgradeOutput -OutputText $upgrade.Text -ExitCode $upgrade.ExitCode) { return $null }
 
-                $count = @(ConvertFrom-SnakeOptimizerWingetTable -Lines $upgrade.Lines).Count
+                $count = @(Remove-SnakeOptimizerWingetIgnoredPackages -Packages @(ConvertFrom-SnakeOptimizerWingetTable -Lines $upgrade.Lines)).Count
                 if ($count -lt 3) { return $null }
 
                 return (New-SnakeOptimizerAgentAlert -Id "programs" -Title "Programas desatualizados" -Text "$(Format-SnakeOptimizerCount -Count $count -One 'programa tem' -Many 'programas têm') versão nova. Clique para atualizar." -Action "updates.winget" -Level Info)

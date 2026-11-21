@@ -308,6 +308,9 @@ function Get-SnakeOptimizerNavigation {
         (New-SnakeOptimizerNavItem -Id "updates.winget" -Label "Atualizar programas (winget)" -Group "Programas e aplicativos" `
             -Keywords "atualizar programas apps upgrade todos tudo desatualizado desatualizados navegador chrome firefox" `
             -Description "Mostra os programas com versão nova no winget e atualiza os que você escolher" -Command "Update-SnakeOptimizerSoftware"),
+        (New-SnakeOptimizerNavItem -Id "updates.winget-ignored" -Label "Programas ignorados no winget" -Group "Programas e aplicativos" `
+            -Keywords "ignorar ignorados não atualizar pular esconder ocultar driver odbc winget pendente" `
+            -Description "Os programas que você mandou ignorar: não aparecem nas atualizações nem contam como pendentes; desmarque para voltar a mostrar" -Command "Invoke-SnakeOptimizerWingetIgnoreManager"),
         (New-SnakeOptimizerNavItem -Id "updates.store" -Label "Atualizar aplicativos da Microsoft Store" -Group "Programas e aplicativos" `
             -Keywords "loja aplicativos apps" `
             -Description "Pede à Microsoft Store as atualizações dos aplicativos e abre a lista para acompanhar" -Command "Update-SnakeOptimizerStoreApps"),

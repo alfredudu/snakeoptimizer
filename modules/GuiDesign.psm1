@@ -155,7 +155,7 @@ $script:SnakeOptimizerIconNames = @{
     "repair.device-scan" = "search"; "repair.optimize" = "speed"; "repair.system-restore" = "history"; "repair.recovery" = "restore"
     "repair.office" = "document"; "repair.office-remove" = "trash"; "repair.office-restore" = "restore"; "repair.print-spooler" = "list"; "repair.store" = "apps"; "repair.time-sync" = "clock"
 
-    "updates.install" = "download"; "updates.winget" = "package"; "updates.windows" = "sync"; "updates.optional" = "list"
+    "updates.install" = "download"; "updates.winget" = "package"; "updates.winget-ignored" = "list"; "updates.windows" = "sync"; "updates.optional" = "list"
     "updates.store" = "apps"; "updates.drivers" = "cpu"; "updates.vendor-tools" = "search"; "updates.repair" = "wrench"
 
     "software.essentials" = "package"; "software.find" = "search"; "software.list" = "list"; "software.uninstall" = "trash"
