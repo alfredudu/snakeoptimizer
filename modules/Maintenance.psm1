@@ -820,6 +820,9 @@ function Invoke-SnakeOptimizerMaintenanceStep {
         Write-SnakeOptimizerProgress -Current ($Position - 1) -Total $Total -Label "Próxima: $($Step.Title)"
     }
 
+    $spaceBefore = $null
+    try { $spaceBefore = Get-SnakeOptimizerSystemDriveSpace } catch { $spaceBefore = $null }
+
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     $result = $null
 
@@ -856,6 +859,20 @@ function Invoke-SnakeOptimizerMaintenanceStep {
     $result.Etapa = $Step.Title
     $result.Duracao = Format-SnakeOptimizerDuration -Span $stopwatch.Elapsed
     Add-Member -InputObject $result -NotePropertyName "StepId" -NotePropertyValue $Step.Id -Force
+
+    # O espaço livre antes e depois da etapa: vai para o resumo ("Espaço por etapa") e para o histórico.
+    $spaceAfter = $null
+    try { $spaceAfter = Get-SnakeOptimizerSystemDriveSpace } catch { $spaceAfter = $null }
+
+    if ($null -ne $spaceBefore -and $null -ne $spaceAfter) {
+        Add-Member -InputObject $result -NotePropertyName "FreeBefore" -NotePropertyValue ([int64]$spaceBefore.FreeBytes) -Force
+        Add-Member -InputObject $result -NotePropertyName "FreeAfter" -NotePropertyValue ([int64]$spaceAfter.FreeBytes) -Force
+
+        $delta = [int64]$spaceAfter.FreeBytes - [int64]$spaceBefore.FreeBytes
+        if ([Math]::Abs($delta) -ge 1MB) {
+            Write-SnakeOptimizerStatus -Type Info -Message "Espaço livre no disco: de $(Format-SnakeOptimizerPreciseBytes -Bytes $spaceBefore.FreeBytes) para $(Format-SnakeOptimizerPreciseBytes -Bytes $spaceAfter.FreeBytes) ($(Format-SnakeOptimizerSpaceDelta -Delta $delta))."
+        }
+    }
 
     return $result
 }
@@ -966,7 +983,7 @@ function Get-SnakeOptimizerSnapshotComparison {
     if ($null -ne $Before.FreeBytes -and $null -ne $After.FreeBytes) {
         $rows += [PSCustomObject]@{
             Label = "Espaço livre no disco do sistema"
-            Text  = "de $(Format-SnakeOptimizerBytes -Bytes $Before.FreeBytes) para $(Format-SnakeOptimizerBytes -Bytes $After.FreeBytes) ($(Format-SnakeOptimizerSignedBytes -Delta ([int64]$After.FreeBytes - [int64]$Before.FreeBytes)))"
+            Text  = "de $(Format-SnakeOptimizerPreciseBytes -Bytes $Before.FreeBytes) para $(Format-SnakeOptimizerPreciseBytes -Bytes $After.FreeBytes) ($(Format-SnakeOptimizerSignedBytes -Delta ([int64]$After.FreeBytes - [int64]$Before.FreeBytes)))"
         }
     }
 
@@ -987,6 +1004,36 @@ function Get-SnakeOptimizerSnapshotComparison {
 # ---------------------------------------------------------------------------
 # Resumo e encerramento
 # ---------------------------------------------------------------------------
+
+function Write-SnakeOptimizerStepSpace {
+    # "Espaço por etapa": as etapas que mudaram o espaço livre em 1 MB ou mais, com o antes, o depois e a diferença. Uma
+    # atualização que baixou arquivos aparece com o sinal de menos.
+    param (
+        [object[]]$Steps = @(),
+        [string]$Title = "Espaço por etapa"
+    )
+
+    $changed = @(
+        foreach ($step in @($Steps | Where-Object { $null -ne $_ })) {
+            $before = Get-SnakeOptimizerJsonValue -Object $step -Name "FreeBefore"
+            $after = Get-SnakeOptimizerJsonValue -Object $step -Name "FreeAfter"
+            if ($null -eq $before -or $null -eq $after) { continue }
+            if ([Math]::Abs([int64]$after - [int64]$before) -lt 1MB) { continue }
+            $step
+        }
+    )
+
+    if ($changed.Count -eq 0) { return }
+
+    Write-SnakeOptimizerSection -Title $Title
+
+    foreach ($step in $changed) {
+        $before = [int64]$step.FreeBefore
+        $after = [int64]$step.FreeAfter
+        Write-SnakeOptimizerKeyValue -Label ([string]$step.Etapa) -Value "$(Format-SnakeOptimizerSpaceDelta -Delta ($after - $before)) (de $(Format-SnakeOptimizerPreciseBytes -Bytes $before) para $(Format-SnakeOptimizerPreciseBytes -Bytes $after))" -LabelWidth 40
+    }
+}
+
 
 function Show-SnakeOptimizerMaintenanceSummary {
     param (
@@ -1032,6 +1079,8 @@ function Show-SnakeOptimizerMaintenanceSummary {
             Write-SnakeOptimizerKeyValue -Label $row.Label -Value $row.Text -LabelWidth 34
         }
     }
+
+    Write-SnakeOptimizerStepSpace -Steps $summaryResults
 
     # Na janela, o desfecho e a duração ficam na faixa de resultado e ao lado do título: repetidos no resumo, eram três
     # vezes a mesma informação na mesma tela.
@@ -1317,6 +1366,8 @@ function Get-SnakeOptimizerMaintenanceResult {
 function Invoke-SnakeOptimizerRecommendedMaintenance {
     # O Otimizar (o botão do Início e Manutenção > Otimizar): veja as fases no alto deste arquivo.
     Enter-SnakeOptimizerAction -Title "Otimizar"
+    # O Otimizar tem o próprio antes e depois (no resumo, por etapa e no histórico de manutenções).
+    Disable-SnakeOptimizerActionSpace
 
     if (-not (Test-SnakeOptimizerElevation -Reason "O Otimizar exige privilégios de Administrador.")) {
         Exit-SnakeOptimizerAction -Result (New-SnakeOptimizerResult -Kind Failed -Detail "requer Administrador")
@@ -1612,6 +1663,9 @@ function Get-SnakeOptimizerMaintenanceStepReference {
         "Verificação de segurança"                 = "Segurança > Verificar vírus"
         "Atualizar o Windows"                      = "Atualizações > Instalar atualizações do Windows"
         "Detectar dispositivos e drivers"          = "Reparo > Detectar dispositivos e drivers"
+        "Detectar dispositivos novos"              = "Reparo > Detectar dispositivos e drivers"
+        "Atualizar drivers pelo fabricante"        = "Atualizações > Ferramentas do fabricante"
+        "Limpeza avançada"                         = "Limpeza > Limpeza avançada"
         "Atualizar programas (winget)"             = "Atualizações > Atualizar programas (winget)"
         "Atualizar aplicativos da Microsoft Store" = "Atualizações > Atualizar aplicativos da Microsoft Store"
         "Remover atalhos quebrados"                = "Limpeza > Remover atalhos quebrados"
@@ -1707,6 +1761,18 @@ function Show-SnakeOptimizerMaintenanceHistory {
         Write-SnakeOptimizerSection -Title "Verificar o PC"
         Write-SnakeOptimizerKeyValue -Label "Última verificação" -Value $checkupText -LabelWidth 34
 
+        # As limpezas e otimizações rodadas sozinhas, com o espaço livre antes e depois de cada uma.
+        $spaceLog = @(Get-SnakeOptimizerSpaceLog | Select-Object -First 10)
+
+        if ($spaceLog.Count -gt 0) {
+            Write-SnakeOptimizerSection -Title "Limpezas e otimizações avulsas"
+
+            foreach ($row in $spaceLog) {
+                $text = "$($row.Title) · $(Format-SnakeOptimizerSpaceDelta -Delta ($row.FreeAfter - $row.FreeBefore)) (de $(Format-SnakeOptimizerPreciseBytes -Bytes $row.FreeBefore) para $(Format-SnakeOptimizerFreeSpaceText -FreeBytes $row.FreeAfter -TotalBytes $row.TotalBytes))"
+                Write-SnakeOptimizerKeyValue -Label (Format-SnakeOptimizerDateTime -When $row.At) -Value $text -LabelWidth 18
+            }
+        }
+
         $read = Get-SnakeOptimizerMaintenanceHistory -Status
         $history = @($read.Entries)
 
@@ -1740,6 +1806,9 @@ function Show-SnakeOptimizerMaintenanceHistory {
         foreach ($entry in $history) {
             Write-SnakeOptimizerKeyValue -Label (Format-SnakeOptimizerDateTime -When $entry.StartedAt) -Value (Format-SnakeOptimizerHistoryLine -Entry $entry) -LabelWidth 18
         }
+
+        # Da mais recente: quanto cada etapa liberou (ou ocupou). As manutenções gravadas antes da 1.9.7 não têm.
+        Write-SnakeOptimizerStepSpace -Steps @($history[0].Steps) -Title "Espaço por etapa (última manutenção)"
 
         Write-Host ""
         Write-SnakeOptimizerStatus -Type Info -Message "O SnakeOptimizer guarda as últimas $(Get-SnakeOptimizerMaintenanceHistoryLimit) manutenções neste computador (pasta de dados do SnakeOptimizer)."

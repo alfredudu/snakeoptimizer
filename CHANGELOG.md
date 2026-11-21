@@ -1,5 +1,14 @@
 # Histórico de mudanças do SnakeOptimizer
 
+## 1.9.7 — 21/11/2026
+
+- **Espaço antes e depois, gravado:**
+  - **Limpezas e otimizações rodadas sozinhas** (Limpeza rápida, personalizada, avançada, perfis, arquivo preso, WinSxS, Verificar o PC, Acelerar agora e qualquer ação que mude o espaço livre em 50 MB ou mais) terminam com a seção **Espaço no disco do sistema**: antes, depois (com duas casas e a % do disco) e a diferença. Cada uma fica gravada.
+  - **Otimizar:** cada etapa mostra o espaço livre de antes e de depois quando ele muda, e o resumo ganhou **Espaço por etapa**, além do antes e depois da execução inteira. Uma atualização que baixou arquivos aparece com sinal de menos.
+  - **Histórico de manutenções:** novas seções **Limpezas e otimizações avulsas** (as últimas 10, com antes e depois) e **Espaço por etapa** da última manutenção.
+  - **Manutenção automática e RMM:** o resumo e o histórico das execuções trazem o espaço de antes e de depois, e quanto cada tarefa mudou.
+- A Liberar memória fica de fora: o que ela libera é RAM, não disco.
+
 ## 1.9.6 — 21/11/2026
 
 - **Início:** botão **Descartar** nos avisos da nota de saúde (como "A última manutenção terminou com 1 etapa pedindo atenção"). O aviso some e deixa de descontar da nota até a situação mudar: a próxima manutenção com problema, por exemplo, aparece de novo. Os avisos graves (vírus, antivírus ou firewall desligado, disco quase cheio) não têm o botão.

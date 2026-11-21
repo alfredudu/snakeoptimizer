@@ -377,7 +377,7 @@ function Invoke-SnakeOptimizerMemoryOptimization {
             Write-SnakeOptimizerStatus -Type Info -Message "Ajuda antes de abrir algo pesado; o efeito some aos poucos."
         }
 
-        $final = New-SnakeOptimizerResult -Kind Ok -Detail (Format-SnakeOptimizerMemoryFreedText -Optimization $optimization) -Title $title -Data @{ FreedBytes = [int64]$optimization.Freed }
+        $final = New-SnakeOptimizerResult -Kind Ok -Detail (Format-SnakeOptimizerMemoryFreedText -Optimization $optimization) -Title $title -Data @{ FreedBytes = [int64]$optimization.Freed; MemoryOnly = $true }
         [void](Set-SnakeOptimizerMemoryOptimizationView -Result $final -Optimization $optimization)
     }
     catch {

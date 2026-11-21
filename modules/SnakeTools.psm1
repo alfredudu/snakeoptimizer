@@ -1672,10 +1672,15 @@ function Invoke-SnakeOptimizerUnattendedRun {
     $runStarted = Get-Date
     $reportPath = ""
     $reboot = $false
+    # O espaço livre do disco do sistema no começo e no fim da execução, e antes e depois de cada tarefa.
+    $runSpaceBefore = $null
+    try { $runSpaceBefore = Get-SnakeOptimizerSystemDriveSpace } catch { $runSpaceBefore = $null }
 
     foreach ($key in $ordered) {
         $definition = $script:SnakeOptimizerUnattendedTasks[$key]
         $started = Get-Date
+        $taskSpaceBefore = $null
+        try { $taskSpaceBefore = Get-SnakeOptimizerSystemDriveSpace } catch { $taskSpaceBefore = $null }
 
         try {
             $result = Invoke-SnakeOptimizerNestedAction -Command $definition.Command -Arguments $definition.Arguments
@@ -1692,17 +1697,34 @@ function Invoke-SnakeOptimizerUnattendedRun {
         if ($needsReboot) { $reboot = $true }
         if ($result.Data -and $result.Data.Report) { $reportPath = [string]$result.Data.Report }
 
+        $taskSpaceAfter = $null
+        try { $taskSpaceAfter = Get-SnakeOptimizerSystemDriveSpace } catch { $taskSpaceAfter = $null }
+        $spaceText = ""
+        if ($null -ne $taskSpaceBefore -and $null -ne $taskSpaceAfter) {
+            $delta = [int64]$taskSpaceAfter.FreeBytes - [int64]$taskSpaceBefore.FreeBytes
+            if ([Math]::Abs($delta) -ge 1MB) { $spaceText = Format-SnakeOptimizerSpaceDelta -Delta $delta }
+        }
+
         $summary += [PSCustomObject]@{
             Tarefa    = $key
             Resultado = $result.Status
             Tempo     = "{0:mm\:ss}" -f ((Get-Date) - $started)
+            Espaco    = $spaceText
             Reiniciar = $(if ($needsReboot) { "sim" } else { "" })
         }
     }
 
+    $runSpaceAfter = $null
+    try { $runSpaceAfter = Get-SnakeOptimizerSystemDriveSpace } catch { $runSpaceAfter = $null }
+
     Write-Host ""
     Write-Host "Resumo do SnakeOptimizer (modo silencioso)" -ForegroundColor Cyan
     $summary | Format-Table -AutoSize | Out-String -Width 200 | Write-Host
+
+    if ($null -ne $runSpaceBefore -and $null -ne $runSpaceAfter) {
+        Write-Host "Espaço no disco do sistema: antes $(Format-SnakeOptimizerFreeSpaceText -FreeBytes $runSpaceBefore.FreeBytes -TotalBytes $runSpaceBefore.TotalBytes); depois $(Format-SnakeOptimizerFreeSpaceText -FreeBytes $runSpaceAfter.FreeBytes -TotalBytes $runSpaceAfter.TotalBytes) ($(Format-SnakeOptimizerSpaceDelta -Delta ([int64]$runSpaceAfter.FreeBytes - [int64]$runSpaceBefore.FreeBytes)))"
+    }
+
     Write-Host "Código de saída: $worst (0 ok, 1 alertas, 2 falha)"
 
     # O histórico que a tela "Manutenção automática" mostra (só com Administrador/SYSTEM, que podem gravar em ProgramData).
@@ -1714,7 +1736,10 @@ function Invoke-SnakeOptimizerUnattendedRun {
                 Code    = $worst
                 Reboot  = $reboot
                 Report  = $reportPath
-                Items   = @($summary | ForEach-Object { [ordered]@{ Tarefa = $_.Tarefa; Resultado = [string]$_.Resultado } })
+                FreeBefore = $(if ($null -ne $runSpaceBefore) { [int64]$runSpaceBefore.FreeBytes } else { $null })
+                FreeAfter  = $(if ($null -ne $runSpaceAfter) { [int64]$runSpaceAfter.FreeBytes } else { $null })
+                TotalBytes = $(if ($null -ne $runSpaceAfter) { [int64]$runSpaceAfter.TotalBytes } else { $null })
+                Items   = @($summary | ForEach-Object { [ordered]@{ Tarefa = $_.Tarefa; Resultado = [string]$_.Resultado; Espaco = [string]$_.Espaco } })
             })
     }
 
@@ -1858,7 +1883,11 @@ function Show-SnakeOptimizerAutoMaintenance {
             $when = $(try { (Get-Date ([datetime]::Parse($run.At, [Globalization.CultureInfo]::InvariantCulture))).ToString("dd/MM HH:mm") } catch { $run.At })
             $outcome = $(switch ([int]$run.Code) { 0 { "tudo certo" } 1 { "com alertas" } default { "com falha" } })
             $problems = @($run.Items | Where-Object { $_.Resultado -notmatch '^OK' } | ForEach-Object { $_.Tarefa })
-            $text = "$(Get-SnakeOptimizerAutoPlanName -Tasks $run.Tasks) · $outcome$(if ($problems) { " ($($problems -join ', '))" }) · $($run.Minutes) min$(if ($run.Reboot) { ' · PEDE REINÍCIO' })"
+            $space = ""
+            if ($null -ne $run.PSObject.Properties["FreeBefore"] -and $null -ne $run.FreeBefore -and $null -ne $run.FreeAfter) {
+                $space = " · espaço: $(Format-SnakeOptimizerSpaceDelta -Delta ([int64]$run.FreeAfter - [int64]$run.FreeBefore)) (de $(Format-SnakeOptimizerPreciseBytes -Bytes ([int64]$run.FreeBefore)) para $(Format-SnakeOptimizerPreciseBytes -Bytes ([int64]$run.FreeAfter)))"
+            }
+            $text = "$(Get-SnakeOptimizerAutoPlanName -Tasks $run.Tasks) · $outcome$(if ($problems) { " ($($problems -join ', '))" }) · $($run.Minutes) min$space$(if ($run.Reboot) { ' · PEDE REINÍCIO' })"
             Write-SnakeOptimizerKeyValue -Label $when -Value $text -LabelWidth 12 -Level $(if ([int]$run.Code -ge 2) { "Warn" } else { "Normal" })
         }
 

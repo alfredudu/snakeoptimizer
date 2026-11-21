@@ -600,6 +600,45 @@ function Write-SnakeOptimizerResultTable {
 # Moldura padrão das ações e resultado de etapa
 # ---------------------------------------------------------------------------
 
+$script:SnakeOptimizerActionSpace = $null
+
+function Write-SnakeOptimizerActionSpace {
+    <#
+    O antes e depois do disco do sistema no fim de uma ação rodada sozinha: aparece nas limpezas (as que contam o que
+    liberaram, Data.FreedBytes) e em qualquer ação que tenha mudado o espaço livre em 50 MB ou mais (WinSxS, atualizações).
+    Fica gravado no histórico de espaço. A Liberar memória fica de fora (Data.MemoryOnly): o que ela libera é RAM.
+    #>
+    param ([Parameter(Mandatory)]$Result)
+
+    $start = $script:SnakeOptimizerActionSpace
+    if ($null -eq $start) { return }
+    if ([bool](Get-SnakeOptimizerResultData -Result $Result -Name "MemoryOnly")) { return }
+    if ([string]$Result.Kind -eq "Skipped" -and [string]$Result.Detail -match "(?i)cancelad") { return }
+
+    $after = Get-SnakeOptimizerSystemDriveSpace
+    if ($null -eq $after) { return }
+
+    $before = $start.Space
+    $delta = [int64]$after.FreeBytes - [int64]$before.FreeBytes
+    $reported = Get-SnakeOptimizerResultData -Result $Result -Name "FreedBytes"
+
+    if ($null -eq $reported -and [Math]::Abs($delta) -lt 50MB) { return }
+
+    Write-SnakeOptimizerSection -Title "Espaço no disco do sistema"
+    Write-SnakeOptimizerKeyValue -Label "Antes" -Value (Format-SnakeOptimizerFreeSpaceText -FreeBytes $before.FreeBytes -TotalBytes $before.TotalBytes)
+    Write-SnakeOptimizerKeyValue -Label "Depois" -Value (Format-SnakeOptimizerFreeSpaceText -FreeBytes $after.FreeBytes -TotalBytes $after.TotalBytes)
+    Write-SnakeOptimizerKeyValue -Label "Diferença" -Value (Format-SnakeOptimizerSpaceDelta -Delta $delta)
+
+    [void](Add-SnakeOptimizerSpaceLogEntry -Title $start.Title -Before $before -After $after -Reported $reported)
+}
+
+
+function Disable-SnakeOptimizerActionSpace {
+    # Para os fluxos que têm o próprio antes e depois (o Otimizar): o fim da ação não repete a comparação.
+    $script:SnakeOptimizerActionSpace = $null
+}
+
+
 function Enter-SnakeOptimizerAction {
     # Abertura de uma ação: cabeçalho completo quando ela é chamada sozinha, apenas uma seção quando faz parte de um fluxo.
     # Na janela gráfica o título da ação já aparece acima da saída (é o nome do botão clicado, igual a este), então
@@ -613,8 +652,18 @@ function Enter-SnakeOptimizerAction {
 
     if ($Embedded -or $script:SnakeOptimizerNestedDepth -gt 0) {
         Write-SnakeOptimizerSection -Title $Title
+        return
     }
-    elseif (-not (Test-SnakeOptimizerGuiMode)) {
+
+    # Uma ação rodada sozinha: o espaço do disco do sistema agora, para o antes e depois do fim (Write-SnakeOptimizerActionSpace).
+    $script:SnakeOptimizerActionSpace = $null
+    try {
+        $space = Get-SnakeOptimizerSystemDriveSpace
+        if ($null -ne $space) { $script:SnakeOptimizerActionSpace = [PSCustomObject]@{ Title = $Title; Space = $space } }
+    }
+    catch { $script:SnakeOptimizerActionSpace = $null }
+
+    if (-not (Test-SnakeOptimizerGuiMode)) {
         # No console, a ação que começa sozinha começa um desfecho novo (a linha final de Exit-SnakeOptimizerAction). Na janela
         # quem zera é o executor, antes de a ação começar.
         Reset-SnakeOptimizerOutcome
@@ -645,8 +694,11 @@ function Exit-SnakeOptimizerAction {
 
     if (-not $Embedded) {
         if ($null -ne $Result -and -not ($Result -is [System.Array])) {
+            try { Write-SnakeOptimizerActionSpace -Result $Result } catch { Write-Verbose "Espaço antes e depois: $($_.Exception.Message)" }
             Set-SnakeOptimizerOutcome -Result $Result
         }
+
+        $script:SnakeOptimizerActionSpace = $null
 
         # No console, a última linha diz como a ação terminou, como a faixa de resultado da janela. Depois de Voltar ou
         # Cancelar não há o que ler: o menu volta sem pedir mais uma tecla.

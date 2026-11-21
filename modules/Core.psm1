@@ -1,7 +1,7 @@
 ﻿# Núcleo: ambiente, sessão, registro, log, formatação e execução de programas nativos.
 # Nada aqui desenha cabeçalhos ou faz perguntas; isso fica em Console.psm1.
 
-$script:SnakeOptimizerBuild = "1.9.6"
+$script:SnakeOptimizerBuild = "1.9.7"
 
 # A trava dos arquivos de estado (Invoke-SnakeOptimizerStateLock): uma por sessão do Windows.
 $script:SnakeOptimizerStateLockName = "Local\SnakeOptimizer.State"
@@ -664,6 +664,114 @@ function Get-SnakeOptimizerSystemDriveSpace {
     }
     catch {
         return $null
+    }
+}
+
+
+function Format-SnakeOptimizerPreciseBytes {
+    # O espaço livre com duas casas ("446,30 GB"): no antes e depois, os três algarismos de Format-SnakeOptimizerBytes
+    # mostrariam "446 GB" e "446 GB" para uma limpeza de 100 MB.
+    param ([int64]$Bytes)
+
+    $culture = [Globalization.CultureInfo]::GetCultureInfo("pt-BR")
+    if ($Bytes -ge 1GB) { return "$(([double]$Bytes / 1GB).ToString('N2', $culture)) GB" }
+    return "$(([double]$Bytes / 1MB).ToString('N0', $culture)) MB"
+}
+
+
+function Format-SnakeOptimizerFreeSpaceText {
+    # "45,20 GB livres (9% do disco)": o espaço livre com a proporção do disco, para o antes e depois.
+    param (
+        [int64]$FreeBytes,
+        [int64]$TotalBytes = 0
+    )
+
+    $text = "$(Format-SnakeOptimizerPreciseBytes -Bytes $FreeBytes) livres"
+    if ($TotalBytes -gt 0) { $text += " ($([int][Math]::Round($FreeBytes * 100.0 / $TotalBytes))% do disco)" }
+    return $text
+}
+
+
+function Format-SnakeOptimizerSpaceDelta {
+    # "+1,8 GB" / "-300 MB"; menos de 1 MB conta como "sem mudança".
+    param ([int64]$Delta)
+
+    if ([Math]::Abs($Delta) -lt 1MB) { return "sem mudança" }
+    return "$(if ($Delta -gt 0) { '+' } else { '-' })$(Format-SnakeOptimizerBytes -Bytes ([Math]::Abs($Delta)))"
+}
+
+
+function Get-SnakeOptimizerSpaceLogPath {
+    return (Join-Path (Get-SnakeOptimizerDataPath) "espaco-historico.json")
+}
+
+
+function Get-SnakeOptimizerSpaceLog {
+    <#
+    O histórico de espaço das limpezas e otimizações rodadas sozinhas (fora do Otimizar, que tem o próprio histórico):
+    At, Title, FreeBefore, FreeAfter, TotalBytes e Reported (o que a ação contou como liberado; $null quando ela não
+    conta). Da mais recente para a mais antiga; vazio quando não há ou não dá para ler.
+    #>
+    try {
+        $state = Read-SnakeOptimizerStateFile -Path (Get-SnakeOptimizerSpaceLogPath)
+        if ($null -eq $state.Document) { return @() }
+
+        return @(
+            foreach ($row in @($state.Document)) {
+                try {
+                    [PSCustomObject]@{
+                        At         = [datetime]::Parse([string]$row.At, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
+                        Title      = [string]$row.Title
+                        FreeBefore = [int64]$row.FreeBefore
+                        FreeAfter  = [int64]$row.FreeAfter
+                        TotalBytes = [int64](Get-SnakeOptimizerJsonValue -Object $row -Name "TotalBytes" -Default 0)
+                        Reported   = $(if ($null -ne (Get-SnakeOptimizerJsonValue -Object $row -Name "Reported")) { [int64]$row.Reported } else { $null })
+                    }
+                }
+                catch { }
+            }
+        )
+    }
+    catch {
+        return @()
+    }
+}
+
+
+function Add-SnakeOptimizerSpaceLogEntry {
+    # Grava o antes e depois de uma ação no histórico de espaço (as últimas 60). Devolve $true se gravou.
+    param (
+        [Parameter(Mandatory)][string]$Title,
+        [Parameter(Mandatory)]$Before,
+        [Parameter(Mandatory)]$After,
+        $Reported = $null
+    )
+
+    try {
+        $entry = [ordered]@{
+            At         = (Get-Date).ToString("o", [Globalization.CultureInfo]::InvariantCulture)
+            Title      = $Title
+            FreeBefore = [int64]$Before.FreeBytes
+            FreeAfter  = [int64]$After.FreeBytes
+            TotalBytes = [int64]$After.TotalBytes
+            Reported   = $(if ($null -ne $Reported) { [int64]$Reported } else { $null })
+        }
+
+        $rows = @(
+            $entry
+            foreach ($old in @(Get-SnakeOptimizerSpaceLog | Select-Object -First 59)) {
+                [ordered]@{
+                    At = $old.At.ToString("o", [Globalization.CultureInfo]::InvariantCulture); Title = $old.Title
+                    FreeBefore = $old.FreeBefore; FreeAfter = $old.FreeAfter; TotalBytes = $old.TotalBytes; Reported = $old.Reported
+                }
+            }
+        )
+
+        Write-SnakeOptimizerStateJson -Path (Get-SnakeOptimizerSpaceLogPath) -InputObject $rows -AsList
+        return $true
+    }
+    catch {
+        return $false
     }
 }
 
@@ -2595,6 +2703,8 @@ function New-SnakeOptimizerMaintenanceHistoryEntry {
                     Etapa   = [string](Get-SnakeOptimizerJsonValue -Object $row -Name "Etapa" -Default "")
                     Kind    = [string](Get-SnakeOptimizerJsonValue -Object $row -Name "Kind" -Default "")
                     Duracao = [string](Get-SnakeOptimizerJsonValue -Object $row -Name "Duracao" -Default "")
+                    FreeBefore = Get-SnakeOptimizerJsonValue -Object $row -Name "FreeBefore"
+                    FreeAfter  = Get-SnakeOptimizerJsonValue -Object $row -Name "FreeAfter"
                 }
             }
         )
@@ -2639,6 +2749,8 @@ function ConvertFrom-SnakeOptimizerMaintenanceHistoryDocument {
                         Etapa   = [string](Get-SnakeOptimizerJsonValue -Object $step -Name "Etapa" -Default "")
                         Kind    = [string](Get-SnakeOptimizerJsonValue -Object $step -Name "Kind" -Default "")
                         Duracao = [string](Get-SnakeOptimizerJsonValue -Object $step -Name "Duracao" -Default "")
+                        FreeBefore = $(if ($null -ne (Get-SnakeOptimizerJsonValue -Object $step -Name "FreeBefore")) { [int64]$step.FreeBefore } else { $null })
+                        FreeAfter  = $(if ($null -ne (Get-SnakeOptimizerJsonValue -Object $step -Name "FreeAfter")) { [int64]$step.FreeAfter } else { $null })
                     }
                 }
             )
@@ -2742,7 +2854,7 @@ function Save-SnakeOptimizerMaintenanceHistoryEntry {
                     StartupAfter    = $item.StartupAfter
                     Steps           = @(
                         foreach ($step in @($item.Steps)) {
-                            [ordered]@{ Etapa = $step.Etapa; Kind = $step.Kind; Duracao = $step.Duracao }
+                            [ordered]@{ Etapa = $step.Etapa; Kind = $step.Kind; Duracao = $step.Duracao; FreeBefore = (Get-SnakeOptimizerJsonValue -Object $step -Name "FreeBefore"); FreeAfter = (Get-SnakeOptimizerJsonValue -Object $step -Name "FreeAfter") }
                         }
                     )
                 }
