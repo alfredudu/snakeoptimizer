@@ -1,5 +1,9 @@
 # Histórico de mudanças do SnakeOptimizer
 
+## 1.8.3 — 21/11/2026
+
+- **Sem janela preta do ícone da bandeja:** no Windows 11 com o Windows Terminal como terminal padrão, `-WindowStyle Hidden` não esconde o console, e o ícone abria com uma janela do PowerShell que ficava aberta (fechá-la derrubava o ícone). O ícone agora abre pelo `conhost.exe --headless`, que não cria janela, tanto pela tarefa da instalação quanto ao ligar o monitor na própria conta. O Atualizador troca a tarefa antiga e reabre o ícone sozinho.
+
 ## 1.8.2 — 21/11/2026
 
 - **Correção do ícone da bandeja que não abria:** quando o Atualizador (SYSTEM) trocava a pasta `app`, ela ficava com as permissões da pasta temporária do SYSTEM, e os usuários não conseguiam ler os arquivos. O ícone falhava ao abrir (resultado -196608), assim como a janela sem elevação. Agora a pasta volta a herdar as permissões de `%ProgramData%\SnakeOptimizer` (usuários leem; só Administradores alteram). As instalações já afetadas são consertadas sozinhas na próxima passada do Atualizador, que reabre o ícone.

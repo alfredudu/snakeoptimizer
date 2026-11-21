@@ -37,11 +37,26 @@ function Get-SnakeOptimizerAgentStopEventName {
 }
 
 
-function Get-SnakeOptimizerAgentCommandLine {
-    # A linha que o Windows roda ao entrar: o PowerShell, oculto, com o script do monitor.
-    $script = Get-SnakeOptimizerAgentScriptPath
+function Get-SnakeOptimizerAgentHost {
+    # Quem abre o PowerShell do monitor sem janela: o conhost --headless (Windows 10 1809 ou mais novo). Com o Windows
+    # Terminal como terminal padrão (Windows 11), "-WindowStyle Hidden" deixava uma janela preta aberta, e fechá-la
+    # derrubava o ícone. Devolve Executable e o prefixo dos argumentos (vazio quando o conhost não serve).
+    $conhost = Join-Path $env:SystemRoot "System32\conhost.exe"
 
-    return "$(ConvertTo-SnakeOptimizerCommandLineArgument -Value (Get-SnakeOptimizerPowerShellPath)) -NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File $(ConvertTo-SnakeOptimizerCommandLineArgument -Value $script)"
+    if ([Environment]::OSVersion.Version.Build -ge 17763 -and (Test-Path -LiteralPath $conhost)) {
+        return [PSCustomObject]@{ Executable = $conhost; Prefix = "--headless $(ConvertTo-SnakeOptimizerCommandLineArgument -Value (Get-SnakeOptimizerPowerShellPath)) " }
+    }
+
+    return [PSCustomObject]@{ Executable = (Get-SnakeOptimizerPowerShellPath); Prefix = "" }
+}
+
+
+function Get-SnakeOptimizerAgentCommandLine {
+    # A linha que o Windows roda ao entrar: o PowerShell, sem janela, com o script do monitor.
+    $script = Get-SnakeOptimizerAgentScriptPath
+    $agentHost = Get-SnakeOptimizerAgentHost
+
+    return "$(ConvertTo-SnakeOptimizerCommandLineArgument -Value $agentHost.Executable) $($agentHost.Prefix)-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File $(ConvertTo-SnakeOptimizerCommandLineArgument -Value $script)"
 }
 
 
@@ -125,16 +140,17 @@ function Start-SnakeOptimizerAgent {
     (monitor.lnk, na pasta de dados) entregue ao Explorador, que o abre na sessão da pessoa, sem elevação. Quem chama
     confere Test-SnakeOptimizerAgentStartBlocked. Uma falha ao pedir a abertura vira um erro em português.
     #>
-    $arguments = "-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File $(ConvertTo-SnakeOptimizerCommandLineArgument -Value (Get-SnakeOptimizerAgentScriptPath))"
+    $agentHost = Get-SnakeOptimizerAgentHost
+    $arguments = "$($agentHost.Prefix)-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File $(ConvertTo-SnakeOptimizerCommandLineArgument -Value (Get-SnakeOptimizerAgentScriptPath))"
 
     try {
         if (Test-SnakeOptimizerAdministrator) {
             $link = Join-Path (Get-SnakeOptimizerDataPath) "monitor.lnk"
-            [void](Save-SnakeOptimizerShortcutFile -Path $link -Target (Get-SnakeOptimizerPowerShellPath) -Arguments $arguments -WorkingDirectory (Get-SnakeOptimizerAppRoot) -Description "Monitor do SnakeOptimizer")
+            [void](Save-SnakeOptimizerShortcutFile -Path $link -Target $agentHost.Executable -Arguments $arguments -WorkingDirectory (Get-SnakeOptimizerAppRoot) -Description "Monitor do SnakeOptimizer")
             Start-Process -FilePath "explorer.exe" -ArgumentList "`"$link`"" -ErrorAction Stop
         }
         else {
-            Start-Process -FilePath (Get-SnakeOptimizerPowerShellPath) -ArgumentList $arguments -WindowStyle Hidden -ErrorAction Stop
+            Start-Process -FilePath $agentHost.Executable -ArgumentList $arguments -WindowStyle Hidden -ErrorAction Stop
         }
     }
     catch {

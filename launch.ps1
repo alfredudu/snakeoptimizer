@@ -374,6 +374,23 @@ $AgentRunName = "SnakeOptimizer Monitor"
 
 $MonitorTask = "Monitor"
 
+function New-HiddenPowerShellAction {
+    # Uma acao de tarefa que roda o PowerShell sem janela nenhuma. No Windows 11 com o Windows Terminal como terminal
+    # padrao, "-WindowStyle Hidden" nao esconde: o Terminal abre uma janela preta que fica aberta enquanto o script roda
+    # (e fecha-la derruba o icone). O conhost --headless (Windows 10 1809 ou mais novo) nao cria janela e nao passa pelo
+    # Terminal.
+    param ([string]$PsArguments, [string]$WorkingDirectory)
+
+    $ps = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+    $conhost = Join-Path $env:SystemRoot "System32\conhost.exe"
+    $build = [Environment]::OSVersion.Version.Build
+
+    if ($build -ge 17763 -and (Test-Path -LiteralPath $conhost)) {
+        return (New-ScheduledTaskAction -Execute $conhost -Argument "--headless `"$ps`" $PsArguments" -WorkingDirectory $WorkingDirectory)
+    }
+    return (New-ScheduledTaskAction -Execute $ps -Argument $PsArguments -WorkingDirectory $WorkingDirectory)
+}
+
 function Get-MonitorFlagPath([string]$Root) { return (Join-Path $Root "monitor-todos-usuarios.flag") }
 
 function Register-MonitorTask {
@@ -383,8 +400,7 @@ function Register-MonitorTask {
     param ([string]$Root)
 
     $agent = Join-Path $Root "app\$AppName.Agent.ps1"
-    $taskAction = New-ScheduledTaskAction -Execute (Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe") `
-        -Argument "-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File `"$agent`" -Machine" -WorkingDirectory (Join-Path $Root "app")
+    $taskAction = New-HiddenPowerShellAction -PsArguments "-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File `"$agent`" -Machine" -WorkingDirectory (Join-Path $Root "app")
     $trigger = New-ScheduledTaskTrigger -AtLogOn
     $trigger.Delay = "PT20S"
     $principal = New-ScheduledTaskPrincipal -GroupId "S-1-5-32-545" -RunLevel Limited
@@ -404,7 +420,24 @@ function Repair-MonitorTask {
 
     if (-not (Test-Path -LiteralPath (Get-MonitorFlagPath $Root))) { return "" }
     $t = Get-ScheduledTask -TaskPath $TaskPath -TaskName $MonitorTask -ErrorAction SilentlyContinue
-    if ($t -and $t.State -ne "Disabled") { return "" }
+    $headless = (New-HiddenPowerShellAction -PsArguments "" -WorkingDirectory $Root).Execute
+    $oldStyle = $t -and (@($t.Actions)[0].Execute -ne $headless)
+    if ($t -and $t.State -ne "Disabled" -and -not $oldStyle) { return "" }
+
+    if ($oldStyle) {
+        # Versoes ate a 1.8.2 abriam o icone com o PowerShell direto: no Windows Terminal ficava uma janela preta aberta.
+        # Troca a tarefa e reabre o icone (o que esta aberto naquela janela fecha).
+        try {
+            Register-MonitorTask -Root $Root
+            foreach ($p in @(Get-AppProcesses (Join-Path $Root "app") | Where-Object { $_.CommandLine -match 'Agent\.ps1' })) {
+                Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
+            }
+            Start-Sleep -Seconds 2
+            return " Icone da bandeja passou a abrir sem janela de console."
+        }
+        catch { return " Nao foi possivel trocar a tarefa do icone ($($_.Exception.Message))." }
+    }
+
     try { Register-MonitorTask -Root $Root; return " Tarefa do icone da bandeja recriada (tinha sumido ou estava desativada)." }
     catch { return " Nao foi possivel recriar a tarefa do icone da bandeja ($($_.Exception.Message))." }
 }
@@ -440,8 +473,7 @@ function Start-AgentInUserSession {
 
     $taskName = "Abrir-Monitor-$([guid]::NewGuid().ToString('N').Substring(0, 8))"
     try {
-        $taskAction = New-ScheduledTaskAction -Execute (Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe") `
-            -Argument "-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File `"$agent`" -Machine"
+        $taskAction = New-HiddenPowerShellAction -PsArguments "-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File `"$agent`" -Machine" -WorkingDirectory (Join-Path $Root "app")
         $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
         $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
         Register-ScheduledTask -TaskPath $TaskPath -TaskName $taskName -Action $taskAction -Principal $principal -Settings $settings `
