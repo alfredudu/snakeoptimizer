@@ -691,9 +691,18 @@ function Send-SnakeOptimizerRunEmail {
         if (-not (Test-SnakeOptimizerEmailReady -Config $config)) { return }
 
         $wanted = switch ([string]$Report.Event) { "Optimize" { [bool]$config.Optimize } "Automatic" { [bool]$config.Automatic } "Standalone" { [bool]$config.Standalone } default { $false } }
-        if (-not $wanted) { return }
+        # Configurado, mas este tipo de execução não manda: diz por quê (sem isso, parecia que o envio tinha falhado
+        # calado). Sem configuração nenhuma, continua sem dizer nada (o PC de um cliente sem e-mail não vê o assunto).
+        if (-not $wanted) {
+            $which = switch ([string]$Report.Event) { "Optimize" { "no Otimizar" } "Automatic" { "na manutenção automática" } default { "nas limpezas avulsas" } }
+            Write-SnakeOptimizerStatus -Type Info -Notice -Message "Resumo por e-mail não enviado: o envio $which está desligado na Área técnica."
+            return
+        }
 
-        if ([bool]$config.OnlyProblems -and [string]$Report.Kind -eq "Ok" -and -not $Report.Reboot -and @($Report.Attention).Count -eq 0) { return }
+        if ([bool]$config.OnlyProblems -and [string]$Report.Kind -eq "Ok" -and -not $Report.Reboot -and @($Report.Attention).Count -eq 0) {
+            Write-SnakeOptimizerStatus -Type Info -Notice -Message "Resumo por e-mail não enviado: está marcado para mandar só quando houver problema, e tudo deu certo."
+            return
+        }
 
         $sent = Send-SnakeOptimizerEmail -Report $Report -Config $config
 

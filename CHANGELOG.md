@@ -1,5 +1,9 @@
 # Histórico de mudanças do SnakeOptimizer
 
+## 1.9.17 — 21/11/2026
+
+- **E-mail:** com o e-mail configurado na Área técnica, o fim de uma ação agora diz quando o resumo não foi enviado e por quê (o envio daquele tipo está desligado, ou está marcado para mandar só quando houver problema e tudo deu certo). Antes ficava calado, e parecia falha.
+
 ## 1.9.16 — 21/11/2026
 
 - **Atualizar agora:** a tela **Versão nova e instalação no PC** dizia que havia versão nova, mas a opção de reinstalar reaproveitava a cópia local, e com a janela aberta a pasta não podia ser trocada: a versão só mudava quando o Atualizador rodava sozinho. Agora, com versão nova, aparece **U = Atualizar agora**: o SnakeOptimizer fecha, baixa a versão nova e abre de novo em alguns segundos, na mesma tela. O que aconteceu fica no atualizador.log.
