@@ -1,5 +1,11 @@
 # Histórico de mudanças do SnakeOptimizer
 
+## 1.9.18 — 21/11/2026
+
+- **O X manda para a bandeja:** fechar a janela pelo X agora faz o mesmo que minimizar: o SnakeOptimizer vai para o ícone perto do relógio e continua aberto (uma ação em andamento segue rodando). Para fechar de vez: botão direito no ícone > **Fechar o SnakeOptimizer**. O aviso da primeira vez explica isso.
+- **Erro do monitor.lnk ao abrir:** em alguns PCs, ao abrir a janela aparecia o erro do Windows "Este arquivo não tem um aplicativo associado" com o caminho do monitor.lnk. O monitor da bandeja agora é reaberto pela tarefa da instalação (\SnakeOptimizer\Monitor), sem passar pelo Explorador; sem a tarefa, ele volta no próximo logon, sem erro.
+- **Atualizar agora:** pede à janela que feche de verdade (o X só a esconde agora).
+
 ## 1.9.17 — 21/11/2026
 
 - **E-mail:** com o e-mail configurado na Área técnica, o fim de uma ação agora diz quando o resumo não foi enviado e por quê (o envio daquele tipo está desligado, ou está marcado para mandar só quando houver problema e tudo deu certo). Antes ficava calado, e parecia falha.

@@ -2176,7 +2176,7 @@ function Start-SnakeOptimizerUpdateNow {
     catch { }
 
     $helper = @'
-param ([int]$WaitPid, [string]$Root, [string]$Url, [string]$Reopen)
+param ([int]$WaitPid, [string]$Root, [string]$Url, [string]$Reopen, [string]$RequestPath)
 $ErrorActionPreference = "Continue"
 $ps = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
 $log = Join-Path $Root "atualizador.log"
@@ -2187,7 +2187,17 @@ Start-Sleep -Seconds 4
 $p = $null
 try { $p = Get-Process -Id $WaitPid -ErrorAction Stop } catch { }
 if ($p) {
-    try { [void]$p.CloseMainWindow() } catch { }
+    # A janela fecha de verdade pelo pedido "app.quit" (o X so a manda para a bandeja); o menu de texto, pelo fechar.
+    $sent = $false
+    if ($RequestPath -and $Reopen -like "*Gui.ps1") {
+        try {
+            $body = '{ "Action": "app.quit", "At": "' + (Get-Date).ToString("o", [Globalization.CultureInfo]::InvariantCulture) + '" }'
+            [IO.File]::WriteAllText($RequestPath, $body, (New-Object Text.UTF8Encoding $false))
+            $sent = $true
+        }
+        catch { }
+    }
+    if (-not $sent) { try { [void]$p.CloseMainWindow() } catch { } }
     if (-not $p.WaitForExit(30000)) {
         Write-HelperLog "a janela nao fechou em 30 s; encerrada."
         try { $p.Kill(); [void]$p.WaitForExit(10000) } catch { }
@@ -2222,7 +2232,8 @@ else {
 
     Start-Process -FilePath $ps -WindowStyle Hidden -WorkingDirectory $Root -ArgumentList @(
         "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden",
-        "-File", "`"$path`"", "-WaitPid", $PID, "-Root", "`"$Root`"", "-Url", "`"$url`"", "-Reopen", $reopen
+        "-File", "`"$path`"", "-WaitPid", $PID, "-Root", "`"$Root`"", "-Url", "`"$url`"", "-Reopen", $reopen,
+        "-RequestPath", "`"$(Join-Path (Get-SnakeOptimizerDataPath) 'window-request.json')`""
     ) | Out-Null
 }
 

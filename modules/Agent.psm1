@@ -139,7 +139,13 @@ function Request-SnakeOptimizerAgentStart {
     $arguments = "$($agentHost.Prefix)-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File $(ConvertTo-SnakeOptimizerCommandLineArgument -Value (Get-SnakeOptimizerAgentScriptPath))"
 
     try {
-        if (Test-SnakeOptimizerAdministrator) {
+        # Instalado no PC: a tarefa do monitor abre na sessão da pessoa, sem elevação e sem o Explorador (que, em alguns
+        # PCs, recusa o atalho com "não tem um aplicativo associado").
+        $task = Get-ScheduledTask -TaskPath "\SnakeOptimizer\" -TaskName "Monitor" -ErrorAction SilentlyContinue
+        if ($null -ne $task -and $task.State -ne "Disabled" -and (Get-SnakeOptimizerAgentScriptPath) -like "$env:ProgramData*") {
+            Start-ScheduledTask -InputObject $task -ErrorAction Stop
+        }
+        elseif (Test-SnakeOptimizerAdministrator) {
             $link = Join-Path (Get-SnakeOptimizerDataPath) "monitor.lnk"
             [void](Save-SnakeOptimizerShortcutFile -Path $link -Target $agentHost.Executable -Arguments $arguments -WorkingDirectory (Get-SnakeOptimizerAppRoot) -Description "Monitor do SnakeOptimizer")
             Start-Process -FilePath "explorer.exe" -ArgumentList "`"$link`"" -ErrorAction Stop
@@ -160,11 +166,18 @@ function Restore-SnakeOptimizerAgentIfMissing {
     caiu, foi encerrado no Gerenciador de Tarefas), abre de novo, sem esperar. Antes, ele só voltava no próximo logon.
     Devolve se pediu a abertura.
     #>
+    # Só pela tarefa do monitor da instalação (\SnakeOptimizer\Monitor, grupo Usuários, sem elevação): o atalho entregue
+    # ao Explorador, usado quando a pessoa liga o monitor, mostrava um erro do Windows ("não tem um aplicativo associado")
+    # em PCs onde o Explorador não abre o .lnk, e aqui ninguém pediu nada. Sem a tarefa, fica para o próximo logon.
     try {
         if (-not (Test-SnakeOptimizerAgentEnabled)) { return $false }
         if (Test-SnakeOptimizerAgentStartBlocked) { return $false }
         if (@(Get-SnakeOptimizerAgentProcesses).Count -gt 0) { return $false }
-        Request-SnakeOptimizerAgentStart
+
+        $task = Get-ScheduledTask -TaskPath "\SnakeOptimizer\" -TaskName "Monitor" -ErrorAction SilentlyContinue
+        if ($null -eq $task -or $task.State -eq "Disabled") { return $false }
+
+        Start-ScheduledTask -InputObject $task -ErrorAction Stop
         return $true
     }
     catch {

@@ -1102,6 +1102,7 @@ function Set-GuiTaskbarFlash {
 
 $script:TrayIcon = $null
 $script:TrayHintShown = $false
+$script:QuitRequested = $false
 $script:StateBeforeTray = "Normal"
 
 function Get-GuiTrayIcon {
@@ -1125,7 +1126,7 @@ function Get-GuiTrayIcon {
     $open.Add_Click({ Show-GuiFromTray })
     [void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
     $quit = $menu.Items.Add("Fechar o SnakeOptimizer")
-    $quit.Add_Click({ Show-GuiFromTray; $window.Close() })
+    $quit.Add_Click({ Close-GuiForReal })
     $tray.ContextMenuStrip = $menu
 
     $tray.Add_MouseClick({
@@ -1155,22 +1156,37 @@ function Show-GuiTrayBalloon {
 
 
 function Hide-GuiToTray {
+    # Devolve se a janela foi para a bandeja. -FromClose: veio do X (o aviso diz como fechar de vez).
+    param ([switch]$FromClose)
+
     try {
         $tray = Get-GuiTrayIcon
         $tray.Visible = $true
         $window.Hide()
 
-        # Só da primeira vez: quem minimiza sempre já sabe onde a janela foi parar.
+        # Só da primeira vez: quem já viu sabe onde a janela foi parar.
         if (-not $script:TrayHintShown) {
             $script:TrayHintShown = $true
             $text = $(if ($script:Running) { "Continua trabalhando aqui na bandeja. Clique no ícone para voltar à janela." } else { "O SnakeOptimizer continua aberto aqui na bandeja. Clique no ícone para voltar." })
+            if ($FromClose) { $text += " Para fechar de vez: botão direito no ícone > Fechar o SnakeOptimizer." }
             Show-GuiTrayBalloon -Text $text
         }
+
+        return $true
     }
     catch {
-        # Sem a bandeja, a janela fica só minimizada, como antes.
+        # Sem a bandeja, a janela fica como antes (minimizada, ou fecha pelo X).
         try { $window.Show() } catch { }
+        return $false
     }
+}
+
+
+function Close-GuiForReal {
+    # Fechar de verdade (o menu do ícone, ou o Atualizar agora): com uma ação rodando, a janela volta antes da pergunta.
+    $script:QuitRequested = $true
+    if ($script:Running) { Show-GuiFromTray }
+    $window.Close()
 }
 
 
@@ -1191,7 +1207,7 @@ function Show-GuiFromTray {
 $window.Add_StateChanged({
     if ($window.WindowState -eq "Minimized") {
         # Logo depois, e não dentro do próprio evento: a janela termina de minimizar antes de sumir.
-        if ($window.IsVisible) { [void]$window.Dispatcher.BeginInvoke([System.Windows.Threading.DispatcherPriority]::Background, [Action]{ if ($window.WindowState -eq "Minimized" -and $window.IsVisible) { Hide-GuiToTray } }) }
+        if ($window.IsVisible) { [void]$window.Dispatcher.BeginInvoke([System.Windows.Threading.DispatcherPriority]::Background, [Action]{ if ($window.WindowState -eq "Minimized" -and $window.IsVisible) { [void](Hide-GuiToTray) } }) }
     }
     else {
         $script:StateBeforeTray = [string]$window.WindowState
@@ -5448,6 +5464,20 @@ function Save-GuiWindowBounds {
 $window.Add_Closing({
     param ($sender, $eventArgs)
 
+    # O X manda para a bandeja (perto do relógio), como minimizar; fecha de vez pelo menu do ícone. Sem a bandeja (o
+    # ícone não pôde ser criado), o X fecha como antes.
+    # A janela não pode ser escondida dentro do próprio Closing (o WPF recusa): cancela e esconde logo em seguida.
+    if (-not $script:ForceClose -and -not $script:QuitRequested) {
+        $trayReady = $false
+        try { $trayReady = ($null -ne (Get-GuiTrayIcon)) } catch { }
+
+        if ($trayReady) {
+            $eventArgs.Cancel = $true
+            [void]$window.Dispatcher.BeginInvoke([System.Windows.Threading.DispatcherPriority]::Background, [Action]{ [void](Hide-GuiToTray -FromClose) })
+            return
+        }
+    }
+
     if ($script:Running -and -not $script:ForceClose) {
         $answer = Show-GuiMessage -Buttons YesNo -Icon Warning -Title "Fechar o SnakeOptimizer" -Text """$($runTitle.Text)"" ainda está em andamento.`n`nSe você fechar o SnakeOptimizer agora, a ação é interrompida: o que já foi feito continua feito, mas a etapa atual fica incompleta.`n`nFechar mesmo assim?"
 
@@ -5585,6 +5615,13 @@ $script:RequestTimer.Add_Tick({
     try {
         $request = Receive-SnakeOptimizerWindowRequest
         if ($null -eq $request) { return }
+
+        # O Atualizar agora pede para a janela fechar de verdade (o X só a esconde). Fechar não dá poder a ninguém: o
+        # pedido vale de qualquer programa desta conta.
+        if ($request.Action -eq "app.quit") {
+            Close-GuiForReal
+            return
+        }
 
         if (-not $window.IsVisible) { Show-GuiFromTray }
         if ($window.WindowState -eq "Minimized") { $window.WindowState = "Normal" }
