@@ -1,5 +1,11 @@
 # Histórico de mudanças do SnakeOptimizer
 
+## 1.9.3 — 21/11/2026
+
+- **Detalhes técnicos:** caixa **Rolar até o fim** ao lado de Copiar, Salvar e Abrir log. Desmarcada, a saída fica parada onde você deixou enquanto a ação roda; marcada de novo, volta ao fim.
+- **Otimizar:** a etapa da Microsoft Store saiu. Ela só enviava o pedido e passava adiante, sem mostrar se algo foi atualizado. Continua em Programas, pedida sozinha.
+- **Otimizar:** a etapa "Detectar dispositivos e drivers" virou **Detectar dispositivos novos**, que é o que ela faz. A atualização de drivers acontece na etapa do Windows Update.
+
 ## 1.9.2 — 21/11/2026
 
 - **Otimizar e manutenção semanal:** o reparo (DISM + SFC) agora vem antes da limpeza de componentes (WinSxS). Com a limpeza primeiro, o serviço de manutenção do Windows ficava com uma checagem pendente e o SFC logo depois levava horas, preso nela.

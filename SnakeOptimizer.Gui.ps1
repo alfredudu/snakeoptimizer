@@ -276,6 +276,7 @@ $runDot = $window.FindName("RunDot")
 $outputBox = $window.FindName("OutputBox")
 $stopButton = $window.FindName("StopButton")
 $copyButton = $window.FindName("CopyButton")
+$autoScrollCheck = $window.FindName("AutoScrollCheck")
 $backButton = $window.FindName("BackButton")
 $footerNav = $window.FindName("FooterNav")
 $progressPanel = $window.FindName("ProgressPanel")
@@ -1568,7 +1569,7 @@ function Set-GuiDetailsOpen {
         # Cosmético.
     }
 
-    if ($Open) { $outputBox.ScrollToEnd() }
+    if ($Open -and ($null -eq $autoScrollCheck -or [bool]$autoScrollCheck.IsChecked)) { $outputBox.ScrollToEnd() }
 }
 
 function Update-GuiSummaryHeight {
@@ -2422,6 +2423,10 @@ function Update-GuiRunView {
         if ($null -eq $script:GuiSession) { return }
 
         $atBottom = (($outputBox.VerticalOffset + $outputBox.ViewportHeight) -ge ($outputBox.ExtentHeight - 24))
+        # Com "Rolar até o fim" desmarcada, a saída fica onde a pessoa deixou: nem desce, nem pula quando uma linha de
+        # percentual é trocada (o cursor no fim do texto puxava a rolagem para baixo).
+        $follow = ($null -eq $autoScrollCheck) -or [bool]$autoScrollCheck.IsChecked
+        $keptOffset = $outputBox.VerticalOffset
         $update = Read-SnakeOptimizerGuiUpdate -Session $script:GuiSession
 
         foreach ($item in $update.Items) {
@@ -2450,8 +2455,11 @@ function Update-GuiRunView {
             $shown++
         }
 
-        if ($shown -gt 0 -and $atBottom) {
+        if ($shown -gt 0 -and $follow -and $atBottom) {
             $outputBox.ScrollToEnd()
+        }
+        elseif ($shown -gt 0 -and -not $follow) {
+            $outputBox.ScrollToVerticalOffset($keptOffset)
         }
 
         # A ação só termina na tela quando tudo o que ela escreveu já foi desenhado.
@@ -4861,6 +4869,13 @@ $runStripDismiss.Add_Click({
 function Get-GuiOutputText {
     $range = New-Object System.Windows.Documents.TextRange ($outputBox.Document.ContentStart, $outputBox.Document.ContentEnd)
     return $range.Text
+}
+
+if ($null -ne $autoScrollCheck) {
+    # Marcada de novo, volta ao fim e passa a acompanhar.
+    $autoScrollCheck.Add_Checked({
+        try { $outputBox.ScrollToEnd() } catch { Write-Verbose "Rolar até o fim: $($_.Exception.Message)" }
+    })
 }
 
 $copyButton.Add_Click({

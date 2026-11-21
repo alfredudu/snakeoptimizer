@@ -986,6 +986,9 @@
               <DockPanel DockPanel.Dock="Top">
                 <!-- Os botões da saída só aparecem com os detalhes abertos (Set-GuiDetailsOpen): fechados, não há o que copiar à vista. -->
                 <StackPanel x:Name="DetailsActions" DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed">
+                  <!-- Desmarcada, a saída para de descer sozinha: dá para ler o que ficou para cima enquanto a ação roda. -->
+                  <CheckBox x:Name="AutoScrollCheck" Style="{StaticResource ListCheckBox}" Content="Rolar até o fim" IsChecked="True"
+                            VerticalAlignment="Center" Margin="0,0,8,0" ToolTip="Desmarque para a saída parar de descer sozinha enquanto a ação roda"/>
                   <Button x:Name="CopyButton" Style="{StaticResource GhostButton}" Content="Copiar" ToolTip="Copia o texto dos detalhes técnicos"/>
                   <Button x:Name="SaveButton" Style="{StaticResource GhostButton}" Content="Salvar" ToolTip="Salva o texto dos detalhes técnicos em um arquivo .txt"/>
                   <Button x:Name="LogButton" Style="{StaticResource GhostButton}" Content="Abrir log" ToolTip="Abre o log completo desta sessão do SnakeOptimizer"/>

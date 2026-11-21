@@ -167,14 +167,14 @@ function Get-SnakeOptimizerMaintenancePlanItems {
             -Description "depois do reparo; só sem reinício pendente (com ele, fica para a próxima vez)"),
         (New-SnakeOptimizerPlanItem -Id "windows-update" -Phase Auto -Title "Atualizar o Windows" `
             -Description "as atualizações e os drivers opcionais; as prévias e uma versão nova do Windows ficam de fora"),
-        (New-SnakeOptimizerPlanItem -Id "drivers" -Phase Auto -Title "Detectar dispositivos e drivers" `
-            -Description "procura hardware novo; o Windows instala o driver que já tiver para ele"),
+        (New-SnakeOptimizerPlanItem -Id "drivers" -Phase Auto -Title "Detectar dispositivos novos" `
+            -Description "procura hardware sem driver; não atualiza drivers (isso é na etapa do Windows Update)"),
         (New-SnakeOptimizerPlanItem -Id "winget" -Phase Auto -Title "Atualizar programas (winget)" `
             -Description "você escolhe o que atualizar antes da parte automática"),
         (New-SnakeOptimizerPlanItem -Id "browsers" -Phase Auto -Title "Atualizar os navegadores" `
             -Description "Edge, Chrome e Firefox, os que estiverem instalados"),
-        (New-SnakeOptimizerPlanItem -Id "store" -Phase Auto -Title "Atualizar aplicativos da Microsoft Store" `
-            -Description "o mesmo pedido do botão Obter atualizações; a Store instala em segundo plano"),
+        # A Microsoft Store saiu do Otimizar: o pedido só é enviado e ela instala (ou não) depois, sem nada para acompanhar
+        # aqui. Continua em Programas, pedida sozinha, quando a lista de downloads da Store abre junto.
         (New-SnakeOptimizerPlanItem -Id "cleanup" -Phase Auto -Title "Limpeza rápida" `
             -Description "temporários do usuário e do Windows; a Lixeira, só se você confirmar"),
         (New-SnakeOptimizerPlanItem -Id "shortcuts" -Phase Auto -Title "Remover atalhos quebrados" `
@@ -738,7 +738,6 @@ function Invoke-SnakeOptimizerMaintenanceStepAction {
             }
         }
         "browsers"      { Update-SnakeOptimizerBrowsers -Embedded -PassThru }
-        "store"         { Update-SnakeOptimizerStoreApps -Embedded -PassThru }
         "shortcuts"     { Invoke-SnakeOptimizerMaintenanceShortcuts }
         "leftovers" {
             $chosen = @(Get-SnakeOptimizerJsonValue -Object $Details -Name "Leftovers" -Default @() | Where-Object { $null -ne $_ })
