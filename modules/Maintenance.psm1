@@ -158,10 +158,13 @@ function Get-SnakeOptimizerMaintenancePlanItems {
             -Description "atualiza o antivírus e faz a verificação rápida do Windows Defender"),
         (New-SnakeOptimizerPlanItem -Id "early-updates" -Phase Auto -Title "Desligar as atualizações antecipadas" `
             -Description "a opção de receber as novidades do Windows assim que saem; pode trazer instabilidade"),
-        (New-SnakeOptimizerPlanItem -Id "components" -Phase Auto -Title "Limpar componentes do Windows (WinSxS)" `
-            -Description "só sem reinício pendente; com ele, fica para a próxima vez"),
+        # O reparo vem antes da limpeza dos componentes. Com a limpeza primeiro, o serviço de manutenção do Windows
+        # (TiWorker) ficava com uma checagem do repositório pendente, e o SFC logo em seguida, preso nele, levava horas
+        # (lotes de 100 componentes a cada 2 minutos e meio, contra segundos).
         (New-SnakeOptimizerPlanItem -Id "repair" -Phase Auto -Title "Reparar o Windows (DISM + SFC)" `
             -Description "o reparo completo, mesmo sem sinal de dano, antes das atualizações; não mexe nos seus arquivos"),
+        (New-SnakeOptimizerPlanItem -Id "components" -Phase Auto -Title "Limpar componentes do Windows (WinSxS)" `
+            -Description "depois do reparo; só sem reinício pendente (com ele, fica para a próxima vez)"),
         (New-SnakeOptimizerPlanItem -Id "windows-update" -Phase Auto -Title "Atualizar o Windows" `
             -Description "as atualizações e os drivers opcionais; as prévias e uma versão nova do Windows ficam de fora"),
         (New-SnakeOptimizerPlanItem -Id "drivers" -Phase Auto -Title "Detectar dispositivos e drivers" `

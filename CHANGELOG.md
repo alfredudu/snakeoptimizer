@@ -1,5 +1,9 @@
 # Histórico de mudanças do SnakeOptimizer
 
+## 1.9.2 — 21/11/2026
+
+- **Otimizar e manutenção semanal:** o reparo (DISM + SFC) agora vem antes da limpeza de componentes (WinSxS). Com a limpeza primeiro, o serviço de manutenção do Windows ficava com uma checagem pendente e o SFC logo depois levava horas, preso nela.
+
 ## 1.9.1 — 21/11/2026
 
 - **Versão nova e instalação no PC:** cada passo da instalação (baixar, trocar a pasta, criar as tarefas, abrir o ícone) aparece na hora. Antes a tela só mostrava a saída no fim e ficava em "Em andamento" sem nenhuma linha, parecendo travada.
