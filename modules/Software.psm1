@@ -1243,43 +1243,124 @@ function Remove-SnakeOptimizerWingetIgnoredPackages {
 }
 
 
+function Set-SnakeOptimizerWingetPin {
+    # Trava (ou destrava) um programa no próprio winget, além da lista do SnakeOptimizer: com a trava "blocking", nem um
+    # "winget upgrade --all" de outro lugar (o RMM, outro técnico) atualiza o programa. Precisa do winget 1.5 ou mais
+    # novo; quando não dá, a lista do SnakeOptimizer continua valendo. Devolve $true quando o winget aceitou.
+    param (
+        [Parameter(Mandatory)][string]$Id,
+        [switch]$Remove
+    )
+
+    if (-not (Test-SnakeOptimizerWinget)) { return $false }
+
+    $arguments = $(if ($Remove) { @("pin", "remove", "--id", $Id, "--exact", "--accept-source-agreements") } else { @("pin", "add", "--id", $Id, "--exact", "--blocking", "--force", "--accept-source-agreements") })
+
+    try {
+        $run = Invoke-SnakeOptimizerCapture -FilePath "winget" -Arguments $arguments
+        return ($run.ExitCode -eq 0)
+    }
+    catch {
+        return $false
+    }
+}
+
+
 function Invoke-SnakeOptimizerWingetIgnoreManager {
     <#
-    Os programas ignorados nas atualizações do winget: todos vêm marcados; desmarcar um faz ele voltar a aparecer na
-    lista de atualizações (e na contagem de desatualizados do Início, do monitor e do Verificar o PC).
+    Manter programas na versão atual: escolher, na lista do que está instalado, os programas que não devem ser
+    atualizados (um sistema que só roda numa versão, um programa cuja versão nova quebrou algo), e revisar os que já
+    estão mantidos. Um programa mantido some das atualizações do SnakeOptimizer (e da contagem de desatualizados do
+    Início, do monitor e do Verificar o PC) e fica travado no winget (Set-SnakeOptimizerWingetPin).
     #>
-    $title = "Programas ignorados no winget"
+    $title = "Manter programas na versão atual"
     Enter-SnakeOptimizerAction -Title $title
 
-    $ignored = @(Get-SnakeOptimizerWingetIgnored)
+    $result = $null
+    $changes = @()
 
-    if ($ignored.Count -eq 0) {
-        Write-SnakeOptimizerStatus -Type Info -Message "Nenhum programa está sendo ignorado. Para ignorar um, use Ignorar programas na lista de Atualizar programas (winget) ou no Otimizar."
-        Exit-SnakeOptimizerAction -Result (New-SnakeOptimizerResult -Kind Ok -Detail "nenhum programa ignorado")
-        return
+    while ($true) {
+        $ignored = @(Get-SnakeOptimizerWingetIgnored)
+
+        if ($ignored.Count -gt 0) {
+            Write-SnakeOptimizerSection -Title "Mantidos na versão atual"
+            foreach ($entry in $ignored) { Write-SnakeOptimizerKeyValue -Label $entry.Nome -Value "$($entry.Id)$(if ($entry.Desde) { " · desde $($entry.Desde)" })" }
+            Write-Host ""
+        }
+        else {
+            Write-SnakeOptimizerStatus -Type Info -Notice -Message "Nenhum programa está sendo mantido na versão atual."
+        }
+
+        $options = @(@{ Key = "A"; Label = "Escolher programas para manter"; Description = "Na lista do que está instalado; eles param de ser atualizados"; Accent = $true })
+        if ($ignored.Count -gt 0) { $options += @{ Key = "L"; Label = "Liberar programas"; Description = "Os desmarcados voltam a ser atualizados" } }
+        $options += @{ Key = "X"; Label = "Fechar"; Exit = $true }
+
+        $answer = Read-SnakeOptimizerChoice -Message "Programas mantidos na versão atual" -Options $options -DefaultKey "X"
+        if ([string]::IsNullOrWhiteSpace($answer) -or $answer -eq "X") { break }
+
+        if ($answer -eq "A") {
+            if (-not (Initialize-SnakeOptimizerWinget)) {
+                Write-SnakeOptimizerStatus -Type Error -Message (Get-SnakeOptimizerWingetMissingDetail)
+                continue
+            }
+
+            Write-Progress -Activity $title -Status "listando os programas instalados"
+            try { $listing = Invoke-SnakeOptimizerCapture -FilePath "winget" -Arguments @("list", "--accept-source-agreements") }
+            finally { Write-Progress -Activity $title -Completed }
+
+            # Só o que o winget conhece pelo nome do catálogo (um Id sem "\"): os demais ele não atualiza mesmo.
+            $known = @($ignored | ForEach-Object { $_.Id.ToLowerInvariant() })
+            $installed = @(ConvertFrom-SnakeOptimizerWingetTable -Lines $listing.Lines | Where-Object {
+                    $_.Id -and [string]$_.Id -notmatch '[\\/]' -and $known -notcontains ([string]$_.Id).ToLowerInvariant() -and -not (Test-SnakeOptimizerWingetComponent -Package $_)
+                } | Sort-Object Nome)
+
+            if ($installed.Count -eq 0) {
+                Write-SnakeOptimizerStatus -Type Warning -Message "O winget não listou programas que possam ser mantidos."
+                continue
+            }
+
+            $picked = Read-SnakeOptimizerMultiSelect -Message "Manter na versão atual" -NoSelectAll -ConfirmLabel "Manter" -CancelLabel "Voltar" -Options @(
+                $installed | ForEach-Object { @{ Key = [string]$_.Id; Label = [string]$_.Nome; Description = "$($_.Id) · versão $($_.Versao)$(if ($_.Disponivel) { " (nova: $($_.Disponivel))" })" } })
+
+            if ($null -eq $picked -or @($picked).Count -eq 0) { continue }
+
+            $today = Format-SnakeOptimizerDateTime -When (Get-Date) -Pattern "dd/MM/yyyy"
+            $added = @($installed | Where-Object { @($picked) -contains [string]$_.Id })
+            Save-SnakeOptimizerWingetIgnored -Entries (@($ignored) + @($added | ForEach-Object { [PSCustomObject]@{ Id = [string]$_.Id; Nome = [string]$_.Nome; Desde = $today } }))
+
+            $unpinned = @()
+            foreach ($package in $added) {
+                Write-Progress -Activity $title -Status "travando $($package.Nome) no winget"
+                if (-not (Set-SnakeOptimizerWingetPin -Id ([string]$package.Id))) { $unpinned += [string]$package.Nome }
+            }
+            Write-Progress -Activity $title -Completed
+
+            Write-SnakeOptimizerStatus -Type Success -Message "Mantidos na versão atual: $(Join-SnakeOptimizerList -Items @($added | ForEach-Object { [string]$_.Nome }))."
+            if ($unpinned.Count -gt 0) { Write-SnakeOptimizerStatus -Type Info -Message "O winget deste PC não aceitou a trava de $(Join-SnakeOptimizerList -Items $unpinned) (winget antigo); o SnakeOptimizer não os atualiza, mas outro programa ainda pode." }
+            Write-SnakeOptimizerStatus -Type Info -Message "Programas que se atualizam sozinhos (como navegadores) podem continuar se atualizando pelo próprio atualizador deles."
+            $changes += "$(Format-SnakeOptimizerCount -Count $added.Count -One 'programa mantido' -Many 'programas mantidos')"
+        }
+        elseif ($answer -eq "L") {
+            $options = @($ignored | ForEach-Object { @{ Key = $_.Id; Label = $_.Nome; Description = "$($_.Id)$(if ($_.Desde) { " · desde $($_.Desde)" })"; Selected = $true } })
+            $kept = Read-SnakeOptimizerMultiSelect -Message "Continuar mantendo" -Options $options -AllowNone -NoSelectAll -ConfirmLabel "Salvar" -CancelLabel "Voltar"
+            if ($null -eq $kept) { continue }
+
+            $back = @($ignored | Where-Object { @($kept) -notcontains $_.Id })
+            Save-SnakeOptimizerWingetIgnored -Entries @($ignored | Where-Object { @($kept) -contains $_.Id })
+
+            foreach ($entry in $back) { [void](Set-SnakeOptimizerWingetPin -Id $entry.Id -Remove) }
+
+            if ($back.Count -gt 0) {
+                Write-SnakeOptimizerStatus -Type Success -Message "Voltam a ser atualizados: $(Join-SnakeOptimizerList -Items @($back | ForEach-Object { $_.Nome }))."
+                $changes += "$(Format-SnakeOptimizerCount -Count $back.Count -One 'programa liberado' -Many 'programas liberados')"
+            }
+            else {
+                Write-SnakeOptimizerStatus -Type Info -Message "Nada mudou."
+            }
+        }
     }
 
-    Write-SnakeOptimizerStatus -Type Info -Message "Estes programas não aparecem nas atualizações nem contam como desatualizados. Desmarque os que devem voltar a aparecer."
-    $options = @($ignored | ForEach-Object { @{ Key = $_.Id; Label = $_.Nome; Description = "$($_.Id)$(if ($_.Desde) { " · ignorado desde $($_.Desde)" })"; Selected = $true } })
-    $kept = Read-SnakeOptimizerMultiSelect -Message "Continuar ignorando" -Options $options -AllowNone -NoSelectAll -ConfirmLabel "Salvar" -CancelLabel "Voltar"
-
-    if ($null -eq $kept) {
-        Exit-SnakeOptimizerAction -Result (New-SnakeOptimizerResult -Kind Skipped -Detail "nada mudou")
-        return
-    }
-
-    $back = @($ignored | Where-Object { @($kept) -notcontains $_.Id })
-    Save-SnakeOptimizerWingetIgnored -Entries @($ignored | Where-Object { @($kept) -contains $_.Id })
-
-    if ($back.Count -gt 0) {
-        Write-SnakeOptimizerStatus -Type Success -Message "Voltam a aparecer nas atualizações: $(Join-SnakeOptimizerList -Items @($back | ForEach-Object { $_.Nome }))."
-        $result = New-SnakeOptimizerResult -Kind Ok -Detail "$(Format-SnakeOptimizerCount -Count $back.Count -One 'programa voltou' -Many 'programas voltaram') a aparecer"
-    }
-    else {
-        Write-SnakeOptimizerStatus -Type Info -Message "Nada mudou."
-        $result = New-SnakeOptimizerResult -Kind Ok -Detail "nada mudou"
-    }
-
+    $result = New-SnakeOptimizerResult -Kind Ok -Detail $(if ($changes.Count -gt 0) { Join-SnakeOptimizerList -Items $changes } else { "nada mudou" })
     Exit-SnakeOptimizerAction -Result $result
 }
 
@@ -1347,7 +1428,7 @@ function Get-SnakeOptimizerWingetUpgradePlan {
     if ($readable -and $available.Count -eq 0) {
         Write-Host ""
         Write-SnakeOptimizerStatus -Type Success -Message "Os programas estão em dia; $(Format-SnakeOptimizerCount -Count $hidden.Count -One 'programa ignorado não aparece' -Many 'programas ignorados não aparecem') ($(Join-SnakeOptimizerList -Items @($hidden | ForEach-Object { [string]$_.Nome })))."
-        Write-SnakeOptimizerStatus -Type Info -Message "Para voltar a mostrar: Atualizações > Programas ignorados no winget."
+        Write-SnakeOptimizerStatus -Type Info -Message "Para voltar a mostrar: Atualizações > Manter programas na versão atual."
         return [PSCustomObject]@{ Action = "NoUpdates"; Ids = @(); Packages = @() }
     }
 
@@ -1356,7 +1437,7 @@ function Get-SnakeOptimizerWingetUpgradePlan {
     if ($available.Count -gt 0) {
         Write-SnakeOptimizerWingetUpgradeList -Packages $available
         if ($hidden.Count -gt 0) {
-            Write-SnakeOptimizerStatus -Type Info -Message "Ignorados (não aparecem): $(Join-SnakeOptimizerList -Items @($hidden | ForEach-Object { [string]$_.Nome })). Para voltar a mostrar: Atualizações > Programas ignorados no winget."
+            Write-SnakeOptimizerStatus -Type Info -Message "Ignorados (não aparecem): $(Join-SnakeOptimizerList -Items @($hidden | ForEach-Object { [string]$_.Nome })). Para voltar a mostrar: Atualizações > Manter programas na versão atual."
         }
         $options = @(
             @{ Key = "S"; Label = "Atualizar todos ($($available.Count))"; Accent = $true },
@@ -1422,7 +1503,7 @@ function Get-SnakeOptimizerWingetUpgradePlan {
                 continue
             }
 
-            Write-SnakeOptimizerStatus -Type Success -Message "Ignorados a partir de agora: $(Join-SnakeOptimizerList -Items @($new | ForEach-Object { $_.Nome })). Para voltar a mostrar: Atualizações > Programas ignorados no winget."
+            Write-SnakeOptimizerStatus -Type Success -Message "Ignorados a partir de agora: $(Join-SnakeOptimizerList -Items @($new | ForEach-Object { $_.Nome })). Para voltar a mostrar: Atualizações > Manter programas na versão atual."
             $available = @($available | Where-Object { @($toIgnore) -notcontains [string]$_.Id })
 
             if ($available.Count -eq 0) {

@@ -903,4 +903,89 @@ function Show-SnakeOptimizerWifiReport {
 }
 
 
+# ---------------------------------------------------------------------------
+# Senhas do Wi-Fi
+# ---------------------------------------------------------------------------
+
+function Get-SnakeOptimizerWifiProfiles {
+    <#
+    As redes Wi-Fi guardadas no PC, com a senha: Name, Ssid, Security e Password (vazia nas redes abertas e nas de
+    empresa, que usam usuário e senha da rede). Usa o "netsh wlan export profile key=clear" (XML, igual em qualquer
+    idioma do Windows) numa pasta temporária, apagada no fim. Sem Administrador, o Windows pode deixar a senha de fora.
+    #>
+    $folder = Join-Path ([IO.Path]::GetTempPath()) ("so-wifi-" + [Guid]::NewGuid().ToString("N"))
+    [void](New-Item -Path $folder -ItemType Directory -Force)
+
+    try {
+        $run = Invoke-SnakeOptimizerCapture -FilePath "netsh.exe" -Arguments @("wlan", "export", "profile", "key=clear", "folder=$folder")
+        $files = @(Get-ChildItem -LiteralPath $folder -Filter "*.xml" -File -ErrorAction SilentlyContinue)
+
+        if ($files.Count -eq 0) {
+            return [PSCustomObject]@{ Available = ($run.ExitCode -eq 0); Profiles = @(); Problem = $(if ($run.ExitCode -ne 0) { ($run.Text -replace '\s+', ' ').Trim() } else { "" }) }
+        }
+
+        $profiles = @(foreach ($file in $files) {
+                try {
+                    [xml]$xml = Get-Content -LiteralPath $file.FullName -Raw -Encoding UTF8
+                    $root = $xml.WLANProfile
+                    $security = $root.MSM.security
+                    $auth = [string]$security.authEncryption.authentication
+                    $key = [string]$security.sharedKey.keyMaterial
+
+                    [PSCustomObject]@{
+                        Name     = [string]$root.name
+                        Ssid     = [string]$(if ($root.SSIDConfig.SSID.name) { $root.SSIDConfig.SSID.name } else { $root.name })
+                        Security = $(switch -Wildcard ($auth) { "open" { "aberta" } "WPA3*" { "WPA3" } "WPA2PSK" { "WPA2" } "WPAPSK" { "WPA" } "WPA2" { "WPA2 empresarial" } "WPA" { "WPA empresarial" } default { $auth } })
+                        Password = $key
+                    }
+                }
+                catch { }
+            })
+
+        return [PSCustomObject]@{ Available = $true; Profiles = @($profiles | Sort-Object Name); Problem = "" }
+    }
+    finally {
+        Remove-Item -LiteralPath $folder -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+
+function Show-SnakeOptimizerWifiPasswords {
+    $title = "Senhas do Wi-Fi"
+    Enter-SnakeOptimizerAction -Title $title
+
+    Write-Progress -Activity $title -Status "lendo as redes guardadas"
+    $read = Get-SnakeOptimizerWifiProfiles
+    Write-Progress -Activity $title -Completed
+
+    if ($read.Profiles.Count -eq 0) {
+        $message = $(if (-not $read.Available) { "Não foi possível ler as redes Wi-Fi: $($read.Problem). O PC pode não ter Wi-Fi (ou o serviço Configuração Automática de WLAN está parado)." } else { "Nenhuma rede Wi-Fi guardada neste PC." })
+        Write-SnakeOptimizerStatus -Type Info -Message $message
+        Exit-SnakeOptimizerAction -Result (New-SnakeOptimizerResult -Kind Ok -Detail "nenhuma rede Wi-Fi guardada")
+        return
+    }
+
+    # A rede em uso agora vem primeiro (o nome do perfil de conexão do Windows é o da rede).
+    $connected = @()
+    try { $connected = @(Get-NetConnectionProfile -ErrorAction Stop | ForEach-Object { [string]$_.Name }) } catch { }
+    $profiles = @($read.Profiles | Sort-Object @{ Expression = { if ($connected -contains $_.Name -or $connected -contains $_.Ssid) { 0 } else { 1 } } }, Name)
+
+    foreach ($wifi in $profiles) {
+        $now = ($connected -contains $wifi.Name -or $connected -contains $wifi.Ssid)
+        Write-SnakeOptimizerSection -Title "$($wifi.Ssid)$(if ($now) { ' (conectado agora)' })"
+        Write-SnakeOptimizerKeyValue -Label "Segurança" -Value $wifi.Security
+
+        if ($wifi.Password) { Write-SnakeOptimizerKeyValue -Label "Senha" -Value $wifi.Password -Level Ok }
+        elseif ($wifi.Security -eq "aberta") { Write-SnakeOptimizerKeyValue -Label "Senha" -Value "rede aberta, sem senha" }
+        elseif ($wifi.Security -like "*empresarial") { Write-SnakeOptimizerKeyValue -Label "Senha" -Value "rede de empresa: usa o usuário e a senha da rede, que o Windows não guarda aqui" }
+        else { Write-SnakeOptimizerKeyValue -Label "Senha" -Value $(if (Test-SnakeOptimizerAdministrator) { "não guardada" } else { "o Windows só mostra abrindo como Administrador" }) }
+    }
+
+    Write-Host ""
+    Write-SnakeOptimizerStatus -Type Info -Message "Para levar as redes para outro PC, use Programas > Backup antes de formatar."
+
+    Exit-SnakeOptimizerAction -Result (New-SnakeOptimizerResult -Kind Ok -Detail "$(Format-SnakeOptimizerCount -Count $profiles.Count -One 'rede Wi-Fi' -Many 'redes Wi-Fi') guardada$(if ($profiles.Count -ne 1) { 's' })")
+}
+
+
 Export-ModuleMember -Function *

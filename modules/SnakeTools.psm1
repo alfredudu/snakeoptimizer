@@ -1255,6 +1255,7 @@ $script:SnakeOptimizerUnattendedTasks = [ordered]@{
     "dns"               = @{ Label = "Limpar cache de DNS e ARP (não derruba a conexão)"; Command = "Invoke-SnakeOptimizerDnsFlush"; Arguments = @{} }
     "rede"              = @{ Label = "Reparo completo de rede (derruba a conexão por instantes; pede reiniciar)"; Command = "Invoke-SnakeOptimizerNetworkRepair"; Arguments = @{ Embedded = $true; Force = $true } }
     "discos"            = @{ Label = "Inventário de discos: % usado de cada unidade, modelo, serial, saúde e SMART (salva .txt em %ProgramData%\SnakeOptimizer\reports)"; Command = "Invoke-SnakeOptimizerUnattendedDiskInventory"; Arguments = @{} }
+    "cofre-bitlocker"   = @{ Label = "Guardar a chave do BitLocker no cofre (Nextcloud da área técnica), só quando ela muda"; Command = "Invoke-SnakeOptimizerUnattendedBitLockerVault"; Arguments = @{} }
     "verificar"         = @{ Label = "Verificar o PC e salvar o relatório (em %ProgramData%\SnakeOptimizer\reports)"; Command = "Invoke-SnakeOptimizerUnattendedReport"; Arguments = @{} }
 }
 
@@ -1684,6 +1685,17 @@ function Invoke-SnakeOptimizerUnattendedRun {
     }
 
     $ordered = @($script:SnakeOptimizerUnattendedTasks.Keys | Where-Object { $requested -contains $_ })
+
+    # Com o cofre do BitLocker ligado, toda execução que verifica o PC (as duas manutenções automáticas terminam com
+    # "verificar") também confere a chave: as tarefas já agendadas nos PCs ganham isso sem serem recriadas. Fica fora de
+    # $ordered, que é o que identifica a execução no histórico (leve, completa ou manual/RMM).
+    $toRun = @($ordered)
+    if ($requested -contains "verificar" -and $requested -notcontains "cofre-bitlocker") {
+        $vault = $null
+        try { $vault = Get-SnakeOptimizerBitLockerVaultConfig } catch { $vault = $null }
+        if ($vault -and $vault.Enabled -and $vault.Url) { $toRun = @($script:SnakeOptimizerUnattendedTasks.Keys | Where-Object { $requested -contains $_ -or $_ -eq "cofre-bitlocker" }) }
+    }
+
     $summary = @()
     $emailSteps = @()
     $worst = 0
@@ -1694,7 +1706,7 @@ function Invoke-SnakeOptimizerUnattendedRun {
     $runSpaceBefore = $null
     try { $runSpaceBefore = Get-SnakeOptimizerSystemDriveSpace } catch { $runSpaceBefore = $null }
 
-    foreach ($key in $ordered) {
+    foreach ($key in $toRun) {
         $definition = $script:SnakeOptimizerUnattendedTasks[$key]
         $started = Get-Date
         $taskSpaceBefore = $null

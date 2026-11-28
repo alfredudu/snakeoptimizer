@@ -824,7 +824,15 @@ function Export-SnakeOptimizerEmailConfig {
     $rng.GetBytes($salt); $rng.GetBytes($iv); $rng.Dispose()
 
     $keys = Get-SnakeOptimizerPasswordHash -Password $Password -Salt $salt -Length 64
-    $plain = [Text.Encoding]::UTF8.GetBytes(($Config | Select-Object Host, Port, Security, User, Password, From, FromName, To, Optimize, Automatic, Standalone, OnlyProblems | ConvertTo-Json -Depth 4))
+    # O cofre do BitLocker (link e senha do Nextcloud) vai junto, para configurar outro PC de uma vez.
+    $data = $Config | Select-Object Host, Port, Security, User, Password, From, FromName, To, Optimize, Automatic, Standalone, OnlyProblems
+    $vault = Get-SnakeOptimizerBitLockerVaultConfig
+    if ($vault.Url) {
+        $data | Add-Member -NotePropertyName VaultUrl -NotePropertyValue ([string]$vault.Url)
+        $data | Add-Member -NotePropertyName VaultPassword -NotePropertyValue ([string]$vault.Password)
+        $data | Add-Member -NotePropertyName VaultEnabled -NotePropertyValue ([bool]$vault.Enabled)
+    }
+    $plain = [Text.Encoding]::UTF8.GetBytes(($data | ConvertTo-Json -Depth 4))
 
     $aes = [System.Security.Cryptography.Aes]::Create()
     $aes.Key = $keys[0..31]; $aes.IV = $iv
@@ -872,6 +880,18 @@ function Import-SnakeOptimizerEmailConfig {
     }
     $config.To = @(@($data.To) | ForEach-Object { [string]$_ } | Where-Object { $_ })
     $config.Enabled = $true
+
+    # O cofre do BitLocker, quando o arquivo traz (exportado da 1.9.19 em diante).
+    if ($data.VaultUrl) {
+        $vault = Get-SnakeOptimizerBitLockerVaultConfig
+        if ([string]$data.VaultUrl -ne $vault.Url) { $vault.Fingerprint = "" }
+        $vault.Url = [string]$data.VaultUrl
+        $vault.Password = [string]$data.VaultPassword
+        $vault.Enabled = $(if ($null -ne $data.VaultEnabled) { [bool]$data.VaultEnabled } else { $true })
+        Save-SnakeOptimizerBitLockerVaultConfig -Config $vault
+        Write-SnakeOptimizerStatus -Type Info -Message "O cofre das chaves do BitLocker veio junto e foi configurado."
+    }
+
     return $config
 }
 
@@ -1027,14 +1047,15 @@ function Invoke-SnakeOptimizerTechnicianArea {
                 @{ Key = "6"; Label = "Exportar a configuração"; Description = "Arquivo .snakemail protegido pela senha técnica, para outros PCs" },
                 @{ Key = "7"; Label = "Importar a configuração"; Description = "De um .snakemail exportado em outro PC" },
                 @{ Key = "8"; Label = "Apagar a configuração deste PC"; Description = "Tira o servidor, a senha e os destinatários" },
+                @{ Key = "9"; Label = "Cofre das chaves do BitLocker"; Description = "Link do Nextcloud para onde vão as chaves de recuperação" },
                 @{ Key = "X"; Label = "Sair"; Exit = $true }
             )
 
             $answer = Read-SnakeOptimizerChoice -Message "O que fazer?" -Options $options -DefaultKey "X" -ShowMenu -TextPrompt "Opção (número, X = sair)"
             if ([string]::IsNullOrWhiteSpace($answer) -or $answer -eq "X") { $result = New-SnakeOptimizerResult -Kind Ok -Detail "configuração revisada"; break }
 
-            # Só o teste (4) e a exportação (6) não mudam a configuração.
-            $changed = ($answer -notin @("4", "6"))
+            # Só o teste (4), a exportação (6) e o cofre (9, que mostra o quadro dele) não mudam a configuração do e-mail.
+            $changed = ($answer -notin @("4", "6", "9"))
 
             try {
                 switch ($answer) {
@@ -1136,6 +1157,9 @@ function Invoke-SnakeOptimizerTechnicianArea {
                             foreach ($file in @($path, "$path.bak")) { if (Test-Path -LiteralPath $file) { Remove-Item -LiteralPath $file -Force } }
                             Write-SnakeOptimizerStatus -Type Success -Message "Configuração de e-mail apagada."
                         }
+                    }
+                    "9" {
+                        Invoke-SnakeOptimizerVaultSetup
                     }
                 }
             }

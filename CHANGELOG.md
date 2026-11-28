@@ -1,5 +1,15 @@
 # Histórico de mudanças do SnakeOptimizer
 
+## 1.9.19 — 28/11/2026
+
+- **Menu em grupos:** a barra lateral (e o menu do console) agora separa as páginas pelo que você quer fazer: **Cuidar** (Manutenção, Limpeza, Desempenho), **Consertar** (Reparo, Diagnóstico, Rede), **Proteger** (Segurança, Atualizações) e **Configurar** (Programas, Ajustes do Windows, Personalização). Os atalhos Ctrl+1 a Ctrl+0 seguem a nova ordem.
+- Nova tela **Segurança > Chave de recuperação do BitLocker**: mostra a chave de cada disco e guarda fora do PC, num arquivo (pendrive, pasta de rede) ou no **cofre**.
+- **Cofre das chaves do BitLocker (Área técnica > 9):** o link de uma pasta do Nextcloud compartilhada com *Solicitar arquivos* (quem tem o link só envia; não vê as chaves dos outros PCs). Cada PC manda um .txt com o nome, o serial e a chave. Com o cofre ligado, a manutenção automática confere a chave todo dia e manda de novo só quando ela muda (também nas tarefas já agendadas, sem recriar). O link fica cifrado no PC e vai junto no .snakemail exportado. Para o RMM: tarefa silenciosa `cofre-bitlocker` e o script `tools\rmm\SnakeOptimizer-BitLocker.ps1`, que funciona até sem o SnakeOptimizer instalado.
+- Nova tela **Diagnóstico > Histórico de telas azuis (90 dias)**: cada tela azul com o código, o nome técnico, a causa provável e o que fazer, agrupadas por código e com o arquivo de despejo, quando existe.
+- Nova tela **Rede > Senhas do Wi-Fi**: a senha de cada rede guardada, começando pela conectada agora.
+- **Atualizações > Manter programas na versão atual** (antes "Programas ignorados no winget"): agora dá para escolher na lista do que está instalado, e o programa fica travado também no próprio winget (pin), não só no SnakeOptimizer. Liberar destrava.
+- **Monitor na bandeja:** avisa quando um disco dá sinais de falha (o Windows marcou com problema, erros não corrigidos, saúde baixa ou desgaste alto), com o disco e as letras, e leva à Saúde dos discos.
+
 ## 1.9.18 — 21/11/2026
 
 - **O X manda para a bandeja:** fechar a janela pelo X agora faz o mesmo que minimizar: o SnakeOptimizer vai para o ícone perto do relógio e continua aberto (uma ação em andamento segue rodando). Para fechar de vez: botão direito no ícone > **Fechar o SnakeOptimizer**. O aviso da primeira vez explica isso.

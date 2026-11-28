@@ -1,9 +1,10 @@
 ﻿# Navegação: a única tabela com as páginas e ações do SnakeOptimizer. A barra lateral da janela e os menus do console
 # leem daqui, então a ordem e os nomes nunca ficam diferentes entre as duas interfaces.
 #
-# Ordem das páginas: primeiro o caminho guiado (Manutenção); depois as ferramentas manuais na sequência natural de
-# quem cuida de um PC: olhar o estado, limpar, consertar, atualizar, instalar programas, conferir a rede e, por fim,
-# personalizar. A página do próprio SnakeOptimizer fica no rodapé da barra lateral (Placement = Footer).
+# Ordem das páginas: quatro grupos pelo que a pessoa quer fazer (veja $sections no fim de Get-SnakeOptimizerNavigation):
+# Cuidar (Manutenção, Limpeza, Desempenho), Consertar (Reparo, Diagnóstico, Rede), Proteger (Segurança, Atualizações) e
+# Configurar (Programas, Ajustes, Personalização). A página do próprio SnakeOptimizer fica no rodapé da barra lateral
+# (Placement = Footer).
 #
 # Nomes: o rótulo de uma ação é o mesmo texto do título que ela mostra ao abrir (um teste confere), para que o botão
 # clicado e a tela aberta nunca tenham nomes diferentes. Ações usam verbo no infinitivo; telas de consulta usam o
@@ -143,6 +144,9 @@ function Get-SnakeOptimizerNavigation {
         (New-SnakeOptimizerNavItem -Id "diagnostics.events" -Label "Eventos críticos (7 dias)" -Group "Funcionamento do Windows" `
             -Keywords "erro tela azul preta bsod travou travando travamento queda de energia falha log reiniciando reiniciou desligando desligou" `
             -Description "Quedas de energia, tela azul, erros de disco e de hardware" -Command "Show-SnakeOptimizerCriticalEvents"),
+        (New-SnakeOptimizerNavItem -Id "diagnostics.bluescreens" -Label "Histórico de telas azuis (90 dias)" -Group "Funcionamento do Windows" `
+            -Keywords "tela azul bsod bugcheck travou reiniciou sozinho erro crash minidump dump despejo driver causa código stop" `
+            -Description "Cada tela azul dos últimos 3 meses, com o código, a causa provável e o que fazer" -Command "Show-SnakeOptimizerBlueScreenHistory"),
         (New-SnakeOptimizerNavItem -Id "diagnostics.pending-reboot" -Label "Reinício pendente" -Group "Funcionamento do Windows" `
             -Keywords "reiniciar reboot restart" `
             -Description "O que está esperando um reinício, se ele é mesmo necessário, e reiniciar quando quiser" -Command "Show-SnakeOptimizerPendingReboot"),
@@ -164,6 +168,9 @@ function Get-SnakeOptimizerNavigation {
         (New-SnakeOptimizerNavItem -Id "security.audit" -Label "Auditoria de segurança" -Group "Proteção" `
             -Description "Além do antivírus e do firewall, confere senhas, acesso remoto e criptografia, e dá uma nota" -Command "Show-SnakeOptimizerSecurityAudit" `
             -Keywords "nota uac smartscreen bitlocker criptografia secure boot remota rdp convidado senha entrada automática"),
+        (New-SnakeOptimizerNavItem -Id "security.bitlocker" -Label "Chave de recuperação do BitLocker" -Group "Proteção" -Admin -Accent `
+            -Keywords "bitlocker chave recuperação recovery key criptografia 48 dígitos backup cofre nextcloud tela azul pedindo chave" `
+            -Description "Mostra a chave de cada disco e guarda fora do PC: num arquivo ou no cofre (Nextcloud)" -Command "Show-SnakeOptimizerBitLockerKeys"),
         (New-SnakeOptimizerNavItem -Id "security.signatures" -Label "Atualizar assinaturas do antivírus" -Group "Proteção" -Admin `
             -Keywords "vírus malware definições atualizar defender" `
             -Description "Baixa do Windows Defender a lista mais nova de vírus conhecidos (as assinaturas)" -Command "Update-SnakeOptimizerDefenderSignatures"),
@@ -308,9 +315,9 @@ function Get-SnakeOptimizerNavigation {
         (New-SnakeOptimizerNavItem -Id "updates.winget" -Label "Atualizar programas (winget)" -Group "Programas e aplicativos" `
             -Keywords "atualizar programas apps upgrade todos tudo desatualizado desatualizados navegador chrome firefox" `
             -Description "Mostra os programas com versão nova no winget e atualiza os que você escolher" -Command "Update-SnakeOptimizerSoftware"),
-        (New-SnakeOptimizerNavItem -Id "updates.winget-ignored" -Label "Programas ignorados no winget" -Group "Programas e aplicativos" `
-            -Keywords "ignorar ignorados não atualizar pular esconder ocultar driver odbc winget pendente" `
-            -Description "Os programas que você mandou ignorar: não aparecem nas atualizações nem contam como pendentes; desmarque para voltar a mostrar" -Command "Invoke-SnakeOptimizerWingetIgnoreManager"),
+        (New-SnakeOptimizerNavItem -Id "updates.winget-ignored" -Label "Manter programas na versão atual" -Group "Programas e aplicativos" `
+            -Keywords "ignorar ignorados não atualizar pular esconder ocultar travar congelar fixar pin versão antiga manter driver odbc winget pendente" `
+            -Description "Escolha os programas que não devem ser atualizados; eles ficam travados no winget até você liberar" -Command "Invoke-SnakeOptimizerWingetIgnoreManager"),
         (New-SnakeOptimizerNavItem -Id "updates.store" -Label "Atualizar aplicativos da Microsoft Store" -Group "Programas e aplicativos" `
             -Keywords "loja aplicativos apps" `
             -Description "Pede à Microsoft Store as atualizações dos aplicativos e abre a lista para acompanhar" -Command "Update-SnakeOptimizerStoreApps"),
@@ -374,6 +381,9 @@ function Get-SnakeOptimizerNavigation {
         (New-SnakeOptimizerNavItem -Id "network.wifi-report" -Label "Relatório de Wi-Fi" -Group "Ver e testar" -Admin `
             -Keywords "wlan quedas desconexoes sinal wireless wifi wi-fi sem fio caindo cai caiu desconectando instável fraco" `
             -Description "Gera o relatório do Windows com as sessões e as quedas do Wi-Fi dos últimos dias" -Command "Show-SnakeOptimizerWifiReport"),
+        (New-SnakeOptimizerNavItem -Id "network.wifi-passwords" -Label "Senhas do Wi-Fi" -Group "Ver e testar" `
+            -Keywords "senha wifi wi-fi wireless rede sem fio esqueci a senha chave de segurança ssid redes salvas" `
+            -Description "A senha de cada rede Wi-Fi guardada no PC, começando pela conectada agora" -Command "Show-SnakeOptimizerWifiPasswords"),
         (New-SnakeOptimizerNavItem -Id "network.repair" -Label "Reparar rede e DNS" -Group "Consertar e configurar" -Admin `
             -Keywords "internet não funciona conecta conectar sem conexão caiu queda wifi wi-fi fio winsock flushdns ipconfig reset renovar reiniciar redefinir dhcp netsh roteador" `
             -Description "Para quando a internet não funciona: refaz as configurações de rede; IP e DNS fixos são mantidos" -Command "Invoke-SnakeOptimizerNetworkRepair"),
@@ -453,7 +463,33 @@ function Get-SnakeOptimizerNavigation {
             -Description "Só para o técnico, com senha: e-mail com o resumo das manutenções" -Command "Invoke-SnakeOptimizerTechnicianArea")
     )
 
-    $script:SnakeOptimizerNavigation = @($pages)
+    # A barra lateral em quatro grupos, pelo que a pessoa quer fazer: cuidar do PC no dia a dia, consertar o que deu
+    # problema, proteger e configurar. A ordem aqui é a da barra lateral, do console e dos atalhos Ctrl+1 a Ctrl+0.
+    $sections = [ordered]@{
+        "Cuidar"     = @("maintenance", "cleanup", "performance")
+        "Consertar"  = @("repair", "diagnostics", "network")
+        "Proteger"   = @("security", "updates")
+        "Configurar" = @("software", "tweaks", "personalize")
+    }
+
+    $ordered = @()
+    foreach ($section in $sections.Keys) {
+        foreach ($id in $sections[$section]) {
+            $page = @($pages | Where-Object { $_.Id -eq $id }) | Select-Object -First 1
+            if ($null -eq $page) { continue }
+            $page | Add-Member -NotePropertyName Section -NotePropertyValue $section -Force
+            $ordered += $page
+        }
+    }
+
+    # Uma página fora dos grupos (nova, esquecida aqui) continua aparecendo, depois deles; o rodapé fica no fim.
+    foreach ($page in $pages) {
+        if (@($ordered | Where-Object { $_.Id -eq $page.Id }).Count -gt 0) { continue }
+        $page | Add-Member -NotePropertyName Section -NotePropertyValue "" -Force
+        $ordered += $page
+    }
+
+    $script:SnakeOptimizerNavigation = @(@($ordered | Where-Object { $_.Placement -ne "Footer" }) + @($ordered | Where-Object { $_.Placement -eq "Footer" }))
     return $script:SnakeOptimizerNavigation
 }
 

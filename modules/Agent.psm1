@@ -23,7 +23,7 @@ function Get-SnakeOptimizerAgentActionIds {
     # As ações que o monitor pede à janela: as do menu do ícone e as dos avisos. A janela só roda estas quando o pedido
     # chega de outra abertura (Receive-SnakeOptimizerWindowRequest).
     # app.monitor (Configurar o monitor) só mostra a tela de escolha: nada muda sem um clique nela.
-    return @("performance.boost", "performance.memory", "performance.processes", "cleanup.quick", "maintenance.checkup", "diagnostics.pending-reboot", "security.status", "diagnostics.windows-support", "updates.winget", "app.monitor")
+    return @("performance.boost", "performance.memory", "performance.processes", "cleanup.quick", "maintenance.checkup", "diagnostics.pending-reboot", "diagnostics.disk-health", "security.status", "diagnostics.windows-support", "updates.winget", "app.monitor")
 }
 
 
@@ -333,6 +333,8 @@ function Get-SnakeOptimizerAgentChecks {
     # Heavy = leitura demorada, feita em segundo plano.
     return @(
         @{ Id = "disk"; EveryMinutes = 15; RepeatHours = 24; Heavy = $false },
+        # Saúde dos discos (estado do Windows, erros e desgaste): a cada 6 horas; o aviso se repete a cada 3 dias.
+        @{ Id = "diskhealth"; EveryMinutes = 360; RepeatHours = 72; Heavy = $true },
         # Memória: a cada passada do monitor (90 s); só avisa depois de 3 leituras seguidas acima do limite (uns 5 min).
         @{ Id = "memory"; EveryMinutes = 1; RepeatHours = 2; Heavy = $false },
         @{ Id = "reboot"; EveryMinutes = 60; RepeatHours = 24; Heavy = $false },
@@ -542,6 +544,22 @@ function Get-SnakeOptimizerAgentReading {
                 $drive = $(if ([string]$env:SystemRoot -match '^([A-Za-z]:)') { $Matches[1].ToUpperInvariant() } else { "C:" })
 
                 return (New-SnakeOptimizerAgentAlert -Id "disk" -Title "Pouco espaço no disco $drive" -Text "Restam $(Format-SnakeOptimizerBytes -Bytes $space.FreeBytes) livres no disco do Windows ($drive). Clique para fazer uma limpeza rápida." -Action "cleanup.quick")
+            }
+            "diskhealth" {
+                # Um disco que o Windows marca com problema, ou com erros não corrigidos, saúde baixa ou desgaste alto
+                # (as notas da Saúde dos discos). A temperatura sozinha não avisa: ela varia com o uso.
+                $bad = @(Get-SnakeOptimizerDiskHealth | Where-Object {
+                        ([string]$_.HealthStatus -in @("Warning", "Unhealthy", "1", "2")) -or @(@($_.Notes) | Where-Object { [string]$_ -notlike "Temperatura*" }).Count -gt 0
+                    })
+                if ($bad.Count -eq 0) { return $null }
+
+                $disk = $bad[0]
+                $drives = @(Get-SnakeOptimizerJsonValue -Object $disk -Name "Drives" -Default @())
+                $where = $(if ($drives.Count -gt 0) { " ($(Join-SnakeOptimizerList -Items $drives))" } else { "" })
+                $note = @(@($disk.Notes) | Where-Object { [string]$_ -notlike "Temperatura*" }) | Select-Object -First 1
+                $why = $(if ($note) { " $note." } else { " O Windows marcou o disco com problema." })
+
+                return (New-SnakeOptimizerAgentAlert -Id "diskhealth" -Title "Disco dando sinais de falha" -Text "$($disk.Name)$where.$why Faça backup dos arquivos importantes. Clique para ver." -Action "diagnostics.disk-health")
             }
             "memory" {
                 # RAM em uso acima de 90% por alguns minutos seguidos: um pico passageiro (abrir um programa) não avisa.

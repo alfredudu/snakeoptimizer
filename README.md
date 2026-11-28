@@ -105,6 +105,7 @@ $env:SO_MODE='Run'; $env:SO_TASK='limpeza-rapida,dns'; irm links.snaketech.com.b
 | `dns` | Limpa o cache DNS e ARP e registra o DNS |
 | `rede` | Reparo completo de rede (IP, DNS, Winsock, TCP/IP) |
 | `discos` | Inventário de discos: % usado de cada unidade, modelo, serial, firmware, interface, saúde, SMART e TRIM (`.txt` em `%ProgramData%\SnakeOptimizer\reports` e na saída do RMM) |
+| `cofre-bitlocker` | Manda a chave de recuperação do BitLocker ao cofre (Nextcloud, configurado na Área técnica), só quando ela muda. Com o cofre ligado, também roda junto de `verificar` |
 | `verificar` | Salva o relatório completo em `%ProgramData%\SnakeOptimizer\reports` |
 
 Várias tarefas separadas por vírgula rodam sempre na ordem da tabela. Códigos de saída: `0` tudo ok, `1` alguma com aviso, `2` alguma falhou, `3` sem privilégios de administrador, `4` tarefa desconhecida. Sem `SO_TASK`, lista as tarefas.

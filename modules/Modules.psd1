@@ -25,6 +25,7 @@
         'Startup',
         'Hardware',
         'Security',
+        'BitLocker',
         'Reports',
         'Tweaks',
         'Backup',

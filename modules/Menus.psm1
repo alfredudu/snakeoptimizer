@@ -221,6 +221,7 @@ function Show-SnakeOptimizerMainMenu {
         $options = @()
         $position = 0
         $footer = $false
+        $section = ""
 
         foreach ($page in $pages) {
             $position++
@@ -229,6 +230,12 @@ function Show-SnakeOptimizerMainMenu {
             if ([string]$page.Placement -eq "Footer" -and -not $footer) {
                 Write-Host ""
                 $footer = $true
+            }
+            elseif ([string]$page.Section -and [string]$page.Section -ne $section) {
+                # Os grupos da barra lateral (Cuidar, Consertar, Proteger, Configurar), como na janela.
+                if ($section) { Write-Host "" }
+                Write-Host "  $($page.Section)" -ForegroundColor DarkCyan
+                $section = [string]$page.Section
             }
 
             Write-SnakeOptimizerMenuItem -Key ([string]$position) -Label $page.Title -Description $page.Summary -Accent:($position -eq 1) -Recommended:($position -eq 1)

@@ -4976,7 +4976,21 @@ $script:PageShortcuts = @("home") + @(Get-SnakeOptimizerNavigation | Where-Objec
 
 Add-GuiNavButton -Id "home" -Title "Início" -Shortcut (Get-SnakeOptimizerPageShortcutKey -Index 0)
 
+# Os grupos da barra lateral (Cuidar, Consertar, Proteger, Configurar): um título pequeno antes da primeira página de cada um.
+$navSection = ""
+
 foreach ($navPage in @(Get-SnakeOptimizerNavigation)) {
+    $section = [string](Get-SnakeOptimizerJsonValue -Object $navPage -Name "Section" -Default "")
+
+    if ($navPage.Placement -ne "Footer" -and $section -and $section -ne $navSection) {
+        $header = New-GuiText -Text $section -Size 11 -Color $script:Theme.Muted -Bold $true
+        $header.TextWrapping = "NoWrap"
+        $header.Margin = New-Object System.Windows.Thickness (12, $(if ($navSection) { 12 } else { 8 }), 0, 4)
+        $header.IsHitTestVisible = $false
+        [void]$navPanel.Children.Add($header)
+        $navSection = $section
+    }
+
     Add-GuiNavButton -Id $navPage.Id -Title $navPage.Title -Footer ($navPage.Placement -eq "Footer") `
         -Shortcut (Get-SnakeOptimizerPageShortcutKey -Index ([array]::IndexOf($script:PageShortcuts, [string]$navPage.Id)))
 }

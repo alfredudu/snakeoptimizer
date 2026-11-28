@@ -2601,4 +2601,162 @@ function Show-SnakeOptimizerCriticalEvents {
 }
 
 
+# ---------------------------------------------------------------------------
+# Histórico de telas azuis
+# ---------------------------------------------------------------------------
+
+# Os códigos de tela azul mais comuns: o nome técnico (o que aparece na tela e se acha na internet), a causa provável e
+# o que fazer, do mais simples ao mais fundo.
+$script:SnakeOptimizerBugCheckCauses = @{
+    0x0A  = @{ Name = "IRQL_NOT_LESS_OR_EQUAL"; Area = "driver"; Cause = "Um driver acessou a memória de um jeito proibido"; Advice = "Atualize os drivers (vídeo, rede, chipset) e desfaça o que foi instalado pouco antes" }
+    0x19  = @{ Name = "BAD_POOL_HEADER"; Area = "driver"; Cause = "Um driver estragou a memória do Windows"; Advice = "Atualize os drivers; se continuar, teste a memória RAM (mdsched)" }
+    0x1A  = @{ Name = "MEMORY_MANAGEMENT"; Area = "memória"; Cause = "Problema na memória RAM ou num driver que a usa"; Advice = "Teste a memória RAM (Diagnóstico de Memória do Windows, mdsched) e desligue o XMP/overclock" }
+    0x1E  = @{ Name = "KMODE_EXCEPTION_NOT_HANDLED"; Area = "driver"; Cause = "Um driver travou com um erro que não tratou"; Advice = "Atualize os drivers e o antivírus" }
+    0x3B  = @{ Name = "SYSTEM_SERVICE_EXCEPTION"; Area = "driver"; Cause = "Erro num driver ou num arquivo do Windows"; Advice = "Atualize os drivers (vídeo principalmente) e rode Reparo > Reparar o Windows (DISM + SFC)" }
+    0x50  = @{ Name = "PAGE_FAULT_IN_NONPAGED_AREA"; Area = "memória"; Cause = "Memória RAM com defeito, driver ou antivírus"; Advice = "Teste a memória RAM, atualize os drivers e o antivírus" }
+    0x77  = @{ Name = "KERNEL_STACK_INPAGE_ERROR"; Area = "disco"; Cause = "O Windows não conseguiu ler o disco"; Advice = "Veja Diagnóstico > Saúde dos discos, confira o cabo do disco e faça backup" }
+    0x7A  = @{ Name = "KERNEL_DATA_INPAGE_ERROR"; Area = "disco"; Cause = "O Windows não conseguiu ler o disco (setor ruim, cabo, controladora)"; Advice = "Veja Diagnóstico > Saúde dos discos, rode Reparo > Verificar o sistema de arquivos (CHKDSK) e faça backup" }
+    0x7E  = @{ Name = "SYSTEM_THREAD_EXCEPTION_NOT_HANDLED"; Area = "driver"; Cause = "Um driver travou"; Advice = "Atualize os drivers, principalmente o de vídeo" }
+    0x7F  = @{ Name = "UNEXPECTED_KERNEL_MODE_TRAP"; Area = "hardware"; Cause = "Falha de hardware (memória, processador) ou de driver"; Advice = "Teste a memória RAM e confira a temperatura do PC" }
+    0x9F  = @{ Name = "DRIVER_POWER_STATE_FAILURE"; Area = "driver"; Cause = "Um driver não respondeu ao suspender, hibernar ou acordar"; Advice = "Atualize os drivers (rede, Wi-Fi, vídeo, chipset) e a BIOS; se continuar, desligue a Inicialização Rápida" }
+    0xC2  = @{ Name = "BAD_POOL_CALLER"; Area = "driver"; Cause = "Um driver usou a memória do Windows de forma errada"; Advice = "Atualize os drivers e o antivírus" }
+    0xC4  = @{ Name = "DRIVER_VERIFIER_DETECTED_VIOLATION"; Area = "driver"; Cause = "O Verificador de Drivers pegou um driver com defeito"; Advice = "Desligue o Verificador (verifier /reset) e atualize o driver apontado" }
+    0xD1  = @{ Name = "DRIVER_IRQL_NOT_LESS_OR_EQUAL"; Area = "driver"; Cause = "Um driver (muitas vezes o de rede ou Wi-Fi) acessou a memória de um jeito proibido"; Advice = "Atualize os drivers de rede, Wi-Fi e vídeo" }
+    0xED  = @{ Name = "UNMOUNTABLE_BOOT_VOLUME"; Area = "disco"; Cause = "O Windows não conseguiu abrir o disco do sistema"; Advice = "Rode Reparo > Verificar o sistema de arquivos (CHKDSK) e veja a saúde do disco" }
+    0xEF  = @{ Name = "CRITICAL_PROCESS_DIED"; Area = "sistema"; Cause = "Um processo essencial do Windows parou (arquivos do Windows ou disco)"; Advice = "Rode Reparo > Reparar o Windows (DISM + SFC) e veja a saúde do disco" }
+    0xF4  = @{ Name = "CRITICAL_OBJECT_TERMINATION"; Area = "disco"; Cause = "Um processo essencial parou, quase sempre por falha de leitura do disco"; Advice = "Veja Diagnóstico > Saúde dos discos e confira o cabo do disco" }
+    0x101 = @{ Name = "CLOCK_WATCHDOG_TIMEOUT"; Area = "hardware"; Cause = "O processador parou de responder (calor, overclock, BIOS)"; Advice = "Confira a temperatura, desligue o overclock e atualize a BIOS" }
+    0x109 = @{ Name = "CRITICAL_STRUCTURE_CORRUPTION"; Area = "driver"; Cause = "Um driver ou a memória RAM estragou uma parte do Windows"; Advice = "Atualize os drivers e teste a memória RAM" }
+    0x116 = @{ Name = "VIDEO_TDR_FAILURE"; Area = "vídeo"; Cause = "A placa de vídeo parou de responder e não voltou"; Advice = "Atualize o driver de vídeo pelo site do fabricante; confira a temperatura e a fonte" }
+    0x117 = @{ Name = "VIDEO_TDR_TIMEOUT_DETECTED"; Area = "vídeo"; Cause = "A placa de vídeo demorou demais para responder"; Advice = "Atualize o driver de vídeo e confira a temperatura" }
+    0x124 = @{ Name = "WHEA_UNCORRECTABLE_ERROR"; Area = "hardware"; Cause = "Erro de hardware: processador, memória, calor ou overclock"; Advice = "Desligue overclock e XMP, confira a temperatura e a fonte, atualize a BIOS" }
+    0x133 = @{ Name = "DPC_WATCHDOG_VIOLATION"; Area = "driver"; Cause = "Um driver (muitas vezes do SSD ou do armazenamento) demorou demais"; Advice = "Atualize o firmware do SSD, o driver de armazenamento (chipset/Intel RST) e a BIOS" }
+    0x139 = @{ Name = "KERNEL_SECURITY_CHECK_FAILURE"; Area = "driver"; Cause = "Um driver ou a memória RAM estragou dados do Windows"; Advice = "Atualize os drivers e teste a memória RAM" }
+    0x13A = @{ Name = "KERNEL_MODE_HEAP_CORRUPTION"; Area = "driver"; Cause = "Um driver estragou a memória do Windows (muitas vezes o de vídeo)"; Advice = "Atualize o driver de vídeo e os demais drivers" }
+    0x154 = @{ Name = "UNEXPECTED_STORE_EXCEPTION"; Area = "disco"; Cause = "Falha ao ler o disco ou o arquivo de paginação"; Advice = "Veja Diagnóstico > Saúde dos discos e atualize o firmware do SSD" }
+    0x1CA = @{ Name = "SYNTHETIC_WATCHDOG_TIMEOUT"; Area = "hardware"; Cause = "O PC parou de responder por muito tempo"; Advice = "Atualize a BIOS e os drivers do chipset" }
+}
+
+
+function Get-SnakeOptimizerBugCheckInfo {
+    # Nome, área, causa provável e conselho de um código de tela azul (0x9F, 159 ou "0x0000009f").
+    param ($Code)
+
+    $value = 0L
+    $text = ([string]$Code).Trim()
+    if ($text -match '^0x([0-9a-fA-F]+)') { $value = [Convert]::ToInt64($Matches[1], 16) }
+    elseif ($text -match '^\d+$') { $value = [int64]$text }
+
+    $hex = "0x{0:X}" -f $value
+    $known = $script:SnakeOptimizerBugCheckCauses[[int]$value]
+
+    if ($null -eq $known) {
+        return [PSCustomObject]@{ Code = $value; Hex = $hex; Name = ""; Area = "desconhecida"; Cause = "Código pouco comum"; Advice = "Procure o código $hex na internet com o nome do modelo do PC" }
+    }
+
+    return [PSCustomObject]@{ Code = $value; Hex = $hex; Name = $known.Name; Area = $known.Area; Cause = $known.Cause; Advice = $known.Advice }
+}
+
+
+function Get-SnakeOptimizerBlueScreens {
+    <#
+    As telas azuis dos últimos dias, da mais nova para a mais antiga: When, Code (número), Parameters (texto) e Dump
+    (arquivo do despejo, quando houve). Vêm do evento 1001 (WER-SystemErrorReporting) e, quando o despejo não foi
+    gravado, do evento 41 (Kernel-Power) que traz o código. Os dois do mesmo travamento contam uma vez.
+    #>
+    param ([int]$Days = 90)
+
+    $window = [int64]([TimeSpan]::FromDays($Days).TotalMilliseconds)
+    $crashes = New-Object System.Collections.Generic.List[object]
+
+    $xpath = "*[System[Provider[@Name='Microsoft-Windows-WER-SystemErrorReporting'] and EventID=1001 and TimeCreated[timediff(@SystemTime) <= $window]]]"
+    foreach ($event in @(Get-WinEvent -LogName System -FilterXPath $xpath -MaxEvents 200 -ErrorAction SilentlyContinue)) {
+        # O código vem no primeiro dado do evento ("0x0000009f (0x3, ...)"); num formato diferente, na mensagem.
+        $first = [string]$(if ($event.Properties.Count -gt 0) { $event.Properties[0].Value } else { "" })
+        $pattern = '(?<code>0x[0-9a-fA-F]+)\s*(\((?<params>[^)]*)\))?'
+        $match = [regex]::Match($first, "^\s*$pattern")
+        if (-not $match.Success) { $match = [regex]::Match([string]$event.Message, '(?<code>0x[0-9a-fA-F]{8,})\s*(\((?<params>[^)]*)\))?') }
+        if (-not $match.Success) { continue }
+
+        $code = [Convert]::ToInt64($match.Groups['code'].Value.Substring(2), 16)
+        $parameters = $match.Groups['params'].Value
+        $dump = [string]$(if ($event.Properties.Count -gt 1) { $event.Properties[1].Value } else { "" })
+
+        $crashes.Add([PSCustomObject]@{ When = $event.TimeCreated; Code = $code; Parameters = $parameters.Trim(); Dump = $dump.Trim() })
+    }
+
+    $xpath41 = "*[System[Provider[@Name='Microsoft-Windows-Kernel-Power'] and EventID=41 and TimeCreated[timediff(@SystemTime) <= $window]]]"
+    foreach ($event in @(Get-WinEvent -LogName System -FilterXPath $xpath41 -MaxEvents 300 -ErrorAction SilentlyContinue)) {
+        $code = 0L
+        try { $code = [int64]$event.Properties[0].Value } catch { $code = 0L }
+        if ($code -le 0) { continue }
+
+        # O 41 é gravado quando o PC volta a ligar, até alguns minutos depois do 1001 do mesmo travamento.
+        $same = @($crashes | Where-Object { $_.Code -eq $code -and [Math]::Abs(($_.When - $event.TimeCreated).TotalMinutes) -le 30 })
+        if ($same.Count -gt 0) { continue }
+
+        $crashes.Add([PSCustomObject]@{ When = $event.TimeCreated; Code = $code; Parameters = ""; Dump = "" })
+    }
+
+    return @($crashes | Sort-Object When -Descending)
+}
+
+
+function Show-SnakeOptimizerBlueScreenHistory {
+    $title = "Histórico de telas azuis (90 dias)"
+    Enter-SnakeOptimizerAction -Title $title
+
+    Write-Progress -Activity $title -Status "lendo os registros do Windows"
+    $crashes = @()
+    try { $crashes = @(Get-SnakeOptimizerBlueScreens -Days 90) }
+    finally { Write-Progress -Activity $title -Completed }
+
+    if ($crashes.Count -eq 0) {
+        Write-SnakeOptimizerStatus -Type Success -Message "Nenhuma tela azul nos últimos 90 dias."
+        Exit-SnakeOptimizerAction -Result (New-SnakeOptimizerResult -Kind Ok -Detail "nenhuma tela azul em 90 dias")
+        return
+    }
+
+    $infos = @($crashes | ForEach-Object { Get-SnakeOptimizerBugCheckInfo -Code $_.Code })
+    $byCode = @($crashes | Group-Object Code | Sort-Object Count -Descending)
+
+    # O resumo: quantas, a mais recente e a área que mais aparece.
+    $areas = @($infos | Group-Object Area | Sort-Object Count -Descending)
+    $last = $crashes[0]
+    $headline = "$(Format-SnakeOptimizerCount -Count $crashes.Count -One 'tela azul' -Many 'telas azuis') em 90 dias; a última em $(Format-SnakeOptimizerDateTime -When $last.When)"
+    Write-SnakeOptimizerStatus -Type Warning -Message "$headline."
+
+    if ($areas.Count -gt 0 -and $areas[0].Name -ne "desconhecida") {
+        Write-SnakeOptimizerStatus -Type Info -Message "O que mais aparece: problema de $($areas[0].Name)$(if ($areas[0].Count -gt 1) { " ($($areas[0].Count) vezes)" })."
+    }
+
+    Write-SnakeOptimizerSection -Title "Por código"
+
+    foreach ($group in $byCode) {
+        $info = Get-SnakeOptimizerBugCheckInfo -Code ([int64]$group.Name)
+        $times = @($group.Group | Sort-Object When -Descending)
+        $when = $(if ($times.Count -eq 1) { "em $(Format-SnakeOptimizerDateTime -When $times[0].When)" } else { "$($times.Count) vezes, a última em $(Format-SnakeOptimizerDateTime -When $times[0].When)" })
+        $name = $(if ($info.Name) { "$($info.Name) ($($info.Hex))" } else { $info.Hex })
+
+        Write-SnakeOptimizerStatus -Type Warning -Message "$name, $when. Causa provável: $($info.Cause.Substring(0,1).ToLowerInvariant() + $info.Cause.Substring(1)). O que fazer: $($info.Advice.Substring(0,1).ToLowerInvariant() + $info.Advice.Substring(1))."
+    }
+
+    Write-SnakeOptimizerSection -Title "Cada ocorrência"
+
+    foreach ($crash in ($crashes | Select-Object -First 20)) {
+        $info = Get-SnakeOptimizerBugCheckInfo -Code $crash.Code
+        $dump = $(if ($crash.Dump -and (Test-Path -LiteralPath $crash.Dump -ErrorAction SilentlyContinue)) { " · despejo: $($crash.Dump)" } elseif ($crash.Dump) { " · despejo apagado" } else { " · sem despejo" })
+        Write-SnakeOptimizerKeyValue -Label (Format-SnakeOptimizerDateTime -When $crash.When) -Value "$(if ($info.Name) { $info.Name } else { $info.Hex })$dump"
+    }
+
+    if ($crashes.Count -gt 20) { Write-SnakeOptimizerStatus -Type Info -Message "E mais $($crashes.Count - 20) antes dessas." }
+
+    Write-Host ""
+    Write-SnakeOptimizerStatus -Type Info -Message "A causa vem do código da tela azul e é a mais comum para ele. Para apontar o driver exato, abra o arquivo de despejo (.dmp) no WinDbg ou no BlueScreenView."
+
+    $kind = $(if ($crashes.Count -ge 3 -or @($crashes | Where-Object { ((Get-Date) - $_.When).TotalDays -le 7 }).Count -gt 0) { "Warning" } else { "Ok" })
+    Exit-SnakeOptimizerAction -Result (New-SnakeOptimizerResult -Kind $kind -Detail $headline)
+}
+
+
 Export-ModuleMember -Function *
