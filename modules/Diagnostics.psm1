@@ -2711,9 +2711,19 @@ function Show-SnakeOptimizerBlueScreenHistory {
     try { $crashes = @(Get-SnakeOptimizerBlueScreens -Days 90) }
     finally { Write-Progress -Activity $title -Completed }
 
+    $dumps = @(Get-SnakeOptimizerMinidumps)
+
     if ($crashes.Count -eq 0) {
-        Write-SnakeOptimizerStatus -Type Success -Message "Nenhuma tela azul nos últimos 90 dias."
-        Exit-SnakeOptimizerAction -Result (New-SnakeOptimizerResult -Kind Ok -Detail "nenhuma tela azul em 90 dias")
+        if ($dumps.Count -eq 0) {
+            Write-SnakeOptimizerStatus -Type Success -Message "Nenhuma tela azul nos últimos 90 dias."
+            Exit-SnakeOptimizerAction -Result (New-SnakeOptimizerResult -Kind Ok -Detail "nenhuma tela azul em 90 dias")
+            return
+        }
+
+        # Os registros do Windows foram limpos (ou são mais antigos), mas os despejos continuam na pasta.
+        Write-SnakeOptimizerStatus -Type Info -Message "Nenhuma tela azul registrada nos últimos 90 dias, mas há $(Format-SnakeOptimizerCount -Count $dumps.Count -One 'despejo' -Many 'despejos') de telas azuis na pasta do Windows (o mais novo de $(Format-SnakeOptimizerDateTime -When $dumps[0].LastWriteTime))."
+        Invoke-SnakeOptimizerBlueScreenDumpMenu -Dumps $dumps
+        Exit-SnakeOptimizerAction -Result (New-SnakeOptimizerResult -Kind Ok -Detail "nenhuma tela azul em 90 dias; $(Format-SnakeOptimizerCount -Count $dumps.Count -One 'despejo antigo' -Many 'despejos antigos')")
         return
     }
 
@@ -2752,10 +2762,240 @@ function Show-SnakeOptimizerBlueScreenHistory {
     if ($crashes.Count -gt 20) { Write-SnakeOptimizerStatus -Type Info -Message "E mais $($crashes.Count - 20) antes dessas." }
 
     Write-Host ""
-    Write-SnakeOptimizerStatus -Type Info -Message "A causa vem do código da tela azul e é a mais comum para ele. Para apontar o driver exato, abra o arquivo de despejo (.dmp) no WinDbg ou no BlueScreenView."
+
+    if ($dumps.Count -gt 0) {
+        Write-SnakeOptimizerStatus -Type Info -Message "A causa acima vem do código e é a mais comum para ele. O BlueScreenView lê os despejos e aponta o driver que travou."
+        Invoke-SnakeOptimizerBlueScreenDumpMenu -Dumps $dumps
+    }
+    else {
+        Write-SnakeOptimizerStatus -Type Info -Message "A causa vem do código da tela azul e é a mais comum para ele. Não há despejos (.dmp) guardados para apontar o driver exato: o Windows pode estar configurado para não gravá-los, ou eles foram apagados numa limpeza."
+    }
 
     $kind = $(if ($crashes.Count -ge 3 -or @($crashes | Where-Object { ((Get-Date) - $_.When).TotalDays -le 7 }).Count -gt 0) { "Warning" } else { "Ok" })
     Exit-SnakeOptimizerAction -Result (New-SnakeOptimizerResult -Kind $kind -Detail $headline)
+}
+
+
+# ---------------------------------------------------------------------------
+# BlueScreenView (NirSoft): o driver que causou cada tela azul
+# ---------------------------------------------------------------------------
+# O BlueScreenView é gratuito, da NirSoft (Nir Sofer). O SnakeOptimizer não o distribui: baixa do site oficial na
+# primeira vez que é preciso, confere a assinatura digital do .exe (tem de ser a da NirSoft) e guarda em
+# %ProgramData%\SnakeOptimizer\tools\BlueScreenView. Ele roda escondido, exportando a lista em XML (/sxml), e a tela
+# mostra o resultado com o que cada driver é e o que fazer; o botão "Abrir o BlueScreenView" abre a janela dele.
+
+$script:SnakeOptimizerBlueScreenViewUrls = @{
+    x64 = "https://www.nirsoft.net/utils/bluescreenview-x64.zip"
+    x86 = "https://www.nirsoft.net/utils/bluescreenview.zip"
+}
+
+# O que é cada driver comum nas telas azuis (pelo começo do nome do arquivo) e o que fazer.
+$script:SnakeOptimizerCrashDrivers = @(
+    @{ Pattern = '^nvlddmkm|^nvkflt|^nvhda'; What = "driver de vídeo da NVIDIA"; Advice = "Reinstale o driver de vídeo pelo site da NVIDIA (instalação limpa); confira a temperatura da placa" }
+    @{ Pattern = '^atikm|^amdkm|^atikmpag|^amdwddmg'; What = "driver de vídeo da AMD"; Advice = "Reinstale o driver de vídeo pelo site da AMD; confira a temperatura da placa" }
+    @{ Pattern = '^igdkmd|^igdkmdn|^igfx'; What = "driver de vídeo da Intel"; Advice = "Atualize o driver de vídeo pela ferramenta do fabricante do PC ou da Intel" }
+    @{ Pattern = '^dxgkrnl|^dxgmms|^watchdog|^win32k'; What = "parte do Windows que conversa com a placa de vídeo"; Advice = "Quase sempre é o driver de vídeo: atualize-o pelo site do fabricante da placa" }
+    @{ Pattern = '^ntoskrnl|^ntkrnl|^hal\.dll|^memory_corruption'; What = "núcleo do Windows"; Advice = "O núcleo só registra a queda; a causa costuma ser outro driver ou a memória RAM. Teste a memória (mdsched) e atualize os drivers" }
+    @{ Pattern = '^netwtw|^netwbw|^netwlv|^rtwlan|^rtwlane|^rtl8|^rt640x|^rt68|^e1d|^e1r|^e1i|^bcmwl|^athw|^ath10|^qca|^mrvl|^ndis|^tcpip|^netio|^wdiwifi|^nwifi'; What = "rede ou Wi-Fi"; Advice = "Atualize o driver de rede e de Wi-Fi pelo site do fabricante; uma VPN ou um antivírus também mexe aqui" }
+    @{ Pattern = '^storport|^stornvme|^storahci|^iastor|^nvme|^amdsata|^amdxata|^ataport|^disk\.sys|^classpnp|^ntfs|^volmgr|^partmgr'; What = "disco e armazenamento"; Advice = "Veja Diagnóstico > Saúde dos discos, atualize o firmware do SSD e o driver de armazenamento (chipset ou Intel RST)" }
+    @{ Pattern = '^fltmgr|^wdfilter|^wdnisdrv|^mpfilter'; What = "filtro de arquivos (antivírus)"; Advice = "Atualize ou troque o antivírus; com dois antivírus no PC, deixe só um" }
+    @{ Pattern = '^avg|^asw|^aswsp|^klif|^kl1|^klhk|^mfe|^bdsel|^bdvedisk|^ehdrv|^epfw|^eamonm|^tmevtmgr|^tmcomm|^sophos|^savonaccess|^cyprotect|^sentinel|^csagent'; What = "antivírus"; Advice = "Atualize o antivírus; se continuar, reinstale ou troque" }
+    @{ Pattern = '^usbxhci|^usbport|^usbhub|^ucx01000|^usbstor|^usbccgp'; What = "USB"; Advice = "Desconecte os aparelhos USB um a um (hub, dongle, celular) e atualize o driver do chipset" }
+    @{ Pattern = '^bthport|^btfilter|^bthusb|^ibtusb'; What = "Bluetooth"; Advice = "Atualize o driver de Bluetooth pelo site do fabricante" }
+    @{ Pattern = '^rtkvhd|^hdaudbus|^portcls|^ks\.sys|^nahimic|^rtkaudio'; What = "áudio"; Advice = "Atualize o driver de áudio (Realtek, por exemplo) e desinstale programas de efeito de som" }
+    @{ Pattern = '^vbox|^vmm|^vmx|^vmci|^hvix64|^hvax64'; What = "virtualização"; Advice = "Atualize o VirtualBox, VMware ou o Hyper-V" }
+    @{ Pattern = '^acpi\.sys|^intelppm|^amdppm|^pci\.sys'; What = "placa-mãe, energia ou processador"; Advice = "Atualize a BIOS e o driver do chipset; desligue overclock e XMP" }
+)
+
+
+function Get-SnakeOptimizerMinidumps {
+    # Os despejos de tela azul em %SystemRoot%\Minidump, do mais novo ao mais antigo. Sem Administrador a pasta não abre:
+    # a lista vem vazia.
+    $folder = Join-Path $env:SystemRoot "Minidump"
+
+    try { return @(Get-ChildItem -LiteralPath $folder -Filter "*.dmp" -File -ErrorAction Stop | Sort-Object LastWriteTime -Descending) }
+    catch { return @() }
+}
+
+
+function Test-SnakeOptimizerNirSoftSignature {
+    # A assinatura digital do .exe é válida e é a da NirSoft (Nir Sofer)?
+    param ([Parameter(Mandatory)][string]$Path)
+
+    try {
+        $signature = Get-AuthenticodeSignature -FilePath $Path -ErrorAction Stop
+        return ($signature.Status -eq "Valid" -and [string]$signature.SignerCertificate.Subject -match 'Nir Sofer')
+    }
+    catch {
+        return $false
+    }
+}
+
+
+function Get-SnakeOptimizerBlueScreenView {
+    <#
+    O caminho do BlueScreenView.exe, baixando do site da NirSoft se ainda não estiver no PC. Devolve Path (vazio se não
+    deu) e Problem. Uma cópia com a assinatura estragada é apagada e baixada de novo.
+    #>
+    $folder = Join-Path $env:ProgramData "SnakeOptimizer\tools\BlueScreenView"
+    $exe = Join-Path $folder "BlueScreenView.exe"
+
+    if ((Test-Path -LiteralPath $exe) -and (Test-SnakeOptimizerNirSoftSignature -Path $exe)) { return [PSCustomObject]@{ Path = $exe; Problem = "" } }
+
+    $arch = $(if ([Environment]::Is64BitOperatingSystem) { "x64" } else { "x86" })
+    $work = Join-Path ([IO.Path]::GetTempPath()) ("so-bsv-" + [Guid]::NewGuid().ToString("N"))
+
+    try {
+        [void](New-Item -Path $work -ItemType Directory -Force)
+        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+
+        $zip = Join-Path $work "bluescreenview.zip"
+        $client = New-Object System.Net.WebClient
+        $client.Headers.Add("User-Agent", "SnakeOptimizer")
+        try { $client.DownloadFile($script:SnakeOptimizerBlueScreenViewUrls[$arch], $zip) } finally { $client.Dispose() }
+
+        Expand-Archive -LiteralPath $zip -DestinationPath (Join-Path $work "x") -Force
+        $downloaded = Join-Path $work "x\BlueScreenView.exe"
+
+        if (-not (Test-Path -LiteralPath $downloaded)) { return [PSCustomObject]@{ Path = ""; Problem = "o pacote baixado não tem o BlueScreenView.exe" } }
+        if (-not (Test-SnakeOptimizerNirSoftSignature -Path $downloaded)) { return [PSCustomObject]@{ Path = ""; Problem = "a assinatura digital do arquivo baixado não é a da NirSoft; ele foi descartado" } }
+
+        if (-not (Test-Path -LiteralPath $folder)) { [void](New-Item -Path $folder -ItemType Directory -Force) }
+        Copy-Item -LiteralPath $downloaded -Destination $exe -Force
+        foreach ($extra in @("BlueScreenView.chm", "readme.txt")) {
+            $source = Join-Path $work "x\$extra"
+            if (Test-Path -LiteralPath $source) { Copy-Item -LiteralPath $source -Destination (Join-Path $folder $extra) -Force }
+        }
+
+        return [PSCustomObject]@{ Path = $exe; Problem = "" }
+    }
+    catch {
+        return [PSCustomObject]@{ Path = ""; Problem = "não foi possível baixar o BlueScreenView da NirSoft ($($_.Exception.Message))" }
+    }
+    finally {
+        Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+
+function Get-SnakeOptimizerCrashDriverInfo {
+    # O que é um driver ("nvlddmkm.sys") e o que fazer; vazio quando ele não é um dos comuns.
+    param ([AllowEmptyString()][string]$Driver)
+
+    $name = ([string]$Driver).Trim().ToLowerInvariant()
+    foreach ($entry in $script:SnakeOptimizerCrashDrivers) {
+        if ($name -match $entry.Pattern) { return [PSCustomObject]@{ What = $entry.What; Advice = $entry.Advice } }
+    }
+
+    return $null
+}
+
+
+function Invoke-SnakeOptimizerBlueScreenView {
+    <#
+    Roda o BlueScreenView escondido sobre a pasta Minidump e devolve um item por despejo: Dump, When (texto do
+    BlueScreenView), BugCheck, Code, Driver, Address, Description, Product, Company e Version. Lança erro se não rodar.
+    #>
+    param ([Parameter(Mandatory)][string]$Exe)
+
+    $xml = Join-Path ([IO.Path]::GetTempPath()) ("so-bsv-" + [Guid]::NewGuid().ToString("N") + ".xml")
+
+    try {
+        $process = Start-Process -FilePath $Exe -ArgumentList @("/MiniDumpFolder", "`"$(Join-Path $env:SystemRoot 'Minidump')`"", "/sxml", "`"$xml`"") -WindowStyle Hidden -PassThru
+        if (-not $process.WaitForExit(120000)) { try { $process.Kill() } catch { }; throw "o BlueScreenView não terminou em 2 minutos" }
+        if (-not (Test-Path -LiteralPath $xml)) { throw "o BlueScreenView não gerou a lista" }
+
+        $document = New-Object System.Xml.XmlDocument
+        $document.Load($xml)
+
+        return @(foreach ($item in $document.DocumentElement.ChildNodes) {
+                if ($item.NodeType -ne [System.Xml.XmlNodeType]::Element) { continue }
+
+                # Os nomes das colunas viram tags ("caused_by_driver"); sem traço e em minúsculas para achar em qualquer versão.
+                $fields = @{}
+                foreach ($child in $item.ChildNodes) { if ($child.NodeType -eq [System.Xml.XmlNodeType]::Element) { $fields[($child.Name -replace '[^A-Za-z0-9]', '').ToLowerInvariant()] = ([string]$child.InnerText).Trim() } }
+
+                [PSCustomObject]@{
+                    Dump        = [string]$fields["dumpfile"]
+                    When        = [string]$fields["crashtime"]
+                    BugCheck    = [string]$fields["bugcheckstring"]
+                    Code        = [string]$fields["bugcheckcode"]
+                    Driver      = [string]$fields["causedbydriver"]
+                    Address     = [string]$fields["causedbyaddress"]
+                    Description = [string]$fields["filedescription"]
+                    Product     = [string]$fields["productname"]
+                    Company     = [string]$fields["company"]
+                    Version     = [string]$fields["fileversion"]
+                }
+            })
+    }
+    finally {
+        Remove-Item -LiteralPath $xml -Force -ErrorAction SilentlyContinue
+    }
+}
+
+
+function Invoke-SnakeOptimizerBlueScreenDumpMenu {
+    # Depois do histórico: analisar os despejos com o BlueScreenView (o driver de cada tela azul) ou abrir a janela dele.
+    param ([AllowEmptyCollection()][object[]]$Dumps = @())
+
+    $analyzed = $false
+
+    while ($true) {
+        $options = @()
+        if (-not $analyzed) { $options += @{ Key = "A"; Label = "Descobrir o driver culpado"; Description = "O BlueScreenView (NirSoft) lê os $(Format-SnakeOptimizerCount -Count $Dumps.Count -One 'despejo' -Many 'despejos') e aponta o driver de cada tela azul"; Accent = $true } }
+        $options += @{ Key = "B"; Label = "Abrir o BlueScreenView"; Description = "A janela do BlueScreenView, com todos os detalhes de cada despejo" }
+        $options += @{ Key = "X"; Label = "Fechar"; Exit = $true }
+
+        $answer = Read-SnakeOptimizerChoice -Message "Despejos das telas azuis" -Options $options -DefaultKey "X"
+        if ([string]::IsNullOrWhiteSpace($answer) -or $answer -eq "X") { return }
+
+        Write-Progress -Activity "BlueScreenView" -Status "preparando (na primeira vez, baixa do site da NirSoft)"
+        $tool = Get-SnakeOptimizerBlueScreenView
+        Write-Progress -Activity "BlueScreenView" -Completed
+
+        if (-not $tool.Path) { Write-SnakeOptimizerStatus -Type Error -Message "BlueScreenView: $($tool.Problem)."; continue }
+
+        if ($answer -eq "B") {
+            Start-Process -FilePath $tool.Path
+            Write-SnakeOptimizerStatus -Type Info -Message "O BlueScreenView abriu numa janela própria. Clique numa tela azul para ver, embaixo, os drivers que estavam na memória; os em destaque são os suspeitos."
+            continue
+        }
+
+        Write-Progress -Activity "BlueScreenView" -Status "lendo os despejos"
+        try { $items = @(Invoke-SnakeOptimizerBlueScreenView -Exe $tool.Path) }
+        catch { Write-SnakeOptimizerStatus -Type Error -Message "BlueScreenView: $($_.Exception.Message)."; continue }
+        finally { Write-Progress -Activity "BlueScreenView" -Completed }
+
+        $analyzed = $true
+
+        if ($items.Count -eq 0) {
+            Write-SnakeOptimizerStatus -Type Warning -Message "O BlueScreenView não conseguiu ler os despejos (podem estar incompletos)."
+            continue
+        }
+
+        # O resumo: o driver que mais aparece.
+        $top = @($items | Where-Object { $_.Driver } | Group-Object Driver | Sort-Object Count -Descending) | Select-Object -First 1
+        if ($top) {
+            $info = Get-SnakeOptimizerCrashDriverInfo -Driver $top.Name
+            $sample = @($top.Group)[0]
+            $label = $(if ($sample.Description) { "$($top.Name) ($($sample.Description))" } else { $top.Name })
+            Write-SnakeOptimizerStatus -Type Warning -Message "Driver que mais derrubou o PC: $label, em $(Format-SnakeOptimizerCount -Count $top.Count -One 'tela azul' -Many 'telas azuis') de $($items.Count)$(if ($info) { ": $($info.What). $($info.Advice)" })."
+        }
+
+        Write-SnakeOptimizerSection -Title "Cada despejo (BlueScreenView)"
+
+        foreach ($item in ($items | Select-Object -First 15)) {
+            $info = Get-SnakeOptimizerCrashDriverInfo -Driver $item.Driver
+            $who = $(if ($item.Driver) { $item.Driver } else { "driver não identificado" })
+            $from = @($item.Description, $item.Company | Where-Object { $_ }) -join ", "
+            $code = $(if ($item.BugCheck) { $item.BugCheck } else { $item.Code })
+            Write-SnakeOptimizerKeyValue -Label $(if ($item.When) { $item.When } else { $item.Dump }) -Value "$code · $who$(if ($from) { " ($from)" })$(if ($info) { " · $($info.What)" })"
+        }
+
+        if ($items.Count -gt 15) { Write-SnakeOptimizerStatus -Type Info -Message "E mais $($items.Count - 15) despejos; Abrir o BlueScreenView mostra todos." }
+        Write-Host ""
+    }
 }
 
 

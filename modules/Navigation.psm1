@@ -144,9 +144,9 @@ function Get-SnakeOptimizerNavigation {
         (New-SnakeOptimizerNavItem -Id "diagnostics.events" -Label "Eventos críticos (7 dias)" -Group "Funcionamento do Windows" `
             -Keywords "erro tela azul preta bsod travou travando travamento queda de energia falha log reiniciando reiniciou desligando desligou" `
             -Description "Quedas de energia, tela azul, erros de disco e de hardware" -Command "Show-SnakeOptimizerCriticalEvents"),
-        (New-SnakeOptimizerNavItem -Id "diagnostics.bluescreens" -Label "Histórico de telas azuis (90 dias)" -Group "Funcionamento do Windows" `
-            -Keywords "tela azul bsod bugcheck travou reiniciou sozinho erro crash minidump dump despejo driver causa código stop" `
-            -Description "Cada tela azul dos últimos 3 meses, com o código, a causa provável e o que fazer" -Command "Show-SnakeOptimizerBlueScreenHistory"),
+        (New-SnakeOptimizerNavItem -Id "diagnostics.bluescreens" -Label "Histórico de telas azuis (90 dias)" -Group "Funcionamento do Windows" -Admin `
+            -Keywords "tela azul bsod bugcheck travou reiniciou sozinho erro crash minidump dump despejo driver causa código stop bluescreenview nirsoft" `
+            -Description "Cada tela azul dos últimos 3 meses, com a causa provável e, pelo BlueScreenView, o driver que travou" -Command "Show-SnakeOptimizerBlueScreenHistory"),
         (New-SnakeOptimizerNavItem -Id "diagnostics.pending-reboot" -Label "Reinício pendente" -Group "Funcionamento do Windows" `
             -Keywords "reiniciar reboot restart" `
             -Description "O que está esperando um reinício, se ele é mesmo necessário, e reiniciar quando quiser" -Command "Show-SnakeOptimizerPendingReboot"),

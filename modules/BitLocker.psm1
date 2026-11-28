@@ -214,9 +214,11 @@ function Get-SnakeOptimizerBitLockerFileName {
 
 function Send-SnakeOptimizerNextcloudFile {
     <#
-    Manda um texto como arquivo para a pasta de um link de compartilhamento do Nextcloud (WebDAV público:
-    PUT <servidor>/public.php/webdav/<arquivo>, usuário = o código do link, senha = a do link ou vazia). Devolve Sent e
-    Problem; nunca lança erro.
+    Manda um texto como arquivo para a pasta de um link de compartilhamento do Nextcloud. Tenta o endereço novo
+    (Nextcloud 29 ou mais novo: PUT <servidor>/public.php/dav/files/<código>/<arquivo>; senha do link pelo usuário
+    "anonymous") e, se ele não existir, o antigo (PUT <servidor>/public.php/webdav/<arquivo>, usuário = o código do
+    link). O cabeçalho X-NC-Nickname (o nome do PC) é exigido pelo "Solicitar arquivos" do Nextcloud 30 em diante, que
+    guarda os arquivos numa subpasta com esse nome. Devolve Sent e Problem; nunca lança erro.
     #>
     param (
         [Parameter(Mandatory)][string]$Url,
@@ -228,35 +230,58 @@ function Send-SnakeOptimizerNextcloudFile {
     $share = ConvertFrom-SnakeOptimizerNextcloudShareUrl -Url $Url
     if ($null -eq $share) { return [PSCustomObject]@{ Sent = $false; Problem = "o link não parece um compartilhamento do Nextcloud (https://servidor/s/codigo)" } }
 
-    try {
-        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    $bytes = (New-Object Text.UTF8Encoding $true).GetPreamble() + [Text.Encoding]::UTF8.GetBytes($Text)
+    $name = [Uri]::EscapeDataString($FileName)
+    $nickname = $(if ($env:COMPUTERNAME) { $env:COMPUTERNAME } else { "SnakeOptimizer" })
 
-        $target = "$($share.Base)/public.php/webdav/$([Uri]::EscapeDataString($FileName))"
-        $request = [System.Net.HttpWebRequest]::Create($target)
-        $request.Method = "PUT"
-        $request.Timeout = 30000
-        $request.ContentType = "text/plain; charset=utf-8"
-        $request.UserAgent = "SnakeOptimizer"
-        $request.Headers.Add("X-Requested-With", "XMLHttpRequest")
-        $request.Headers.Add("Authorization", "Basic " + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("$($share.Token):$Password")))
+    $routes = @(
+        @{ Target = "$($share.Base)/public.php/dav/files/$($share.Token)/$name"; User = "anonymous"; Auth = [bool]$Password },
+        @{ Target = "$($share.Base)/public.php/webdav/$name"; User = $share.Token; Auth = $true }
+    )
 
-        $bytes = (New-Object Text.UTF8Encoding $true).GetPreamble() + [Text.Encoding]::UTF8.GetBytes($Text)
-        $request.ContentLength = $bytes.Length
-        $stream = $request.GetRequestStream()
-        try { $stream.Write($bytes, 0, $bytes.Length) } finally { $stream.Dispose() }
+    $last = $null
 
-        $response = $request.GetResponse()
-        $code = [int]$response.StatusCode
-        $response.Dispose()
+    foreach ($route in $routes) {
+        try {
+            $request = [System.Net.HttpWebRequest]::Create($route.Target)
+            $request.Method = "PUT"
+            $request.Timeout = 30000
+            $request.ContentType = "text/plain; charset=utf-8"
+            $request.UserAgent = "SnakeOptimizer"
+            $request.Headers.Add("X-Requested-With", "XMLHttpRequest")
+            $request.Headers.Add("X-NC-Nickname", $nickname)
+            if ($route.Auth) { $request.Headers.Add("Authorization", "Basic " + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("$($route.User):$Password"))) }
 
-        if ($code -ge 200 -and $code -lt 300) { return [PSCustomObject]@{ Sent = $true; Problem = "" } }
-        return [PSCustomObject]@{ Sent = $false; Problem = "o servidor respondeu $code" }
+            $request.ContentLength = $bytes.Length
+            $stream = $request.GetRequestStream()
+            try { $stream.Write($bytes, 0, $bytes.Length) } finally { $stream.Dispose() }
+
+            $response = $request.GetResponse()
+            $code = [int]$response.StatusCode
+            $response.Dispose()
+
+            if ($code -ge 200 -and $code -lt 300) { return [PSCustomObject]@{ Sent = $true; Problem = "" } }
+            $last = [PSCustomObject]@{ Code = $code; Reason = "" }
+        }
+        catch [System.Net.WebException] {
+            $failure = $_.Exception
+            $last = [PSCustomObject]@{
+                Code   = $(if ($failure.Response) { [int]$failure.Response.StatusCode } else { 0 })
+                Reason = $(if ($failure.InnerException -and $failure.InnerException.Message) { $failure.InnerException.Message } else { $failure.Message })
+            }
+
+            # Sem conexão, o outro endereço também não vai responder.
+            if ($last.Code -eq 0) { break }
+        }
+        catch {
+            return [PSCustomObject]@{ Sent = $false; Problem = $_.Exception.Message }
+        }
     }
-    catch [System.Net.WebException] {
-        # Guardado antes do switch: dentro dele, $_ passa a ser o código.
-        $failure = $_.Exception
-        $reason = $(if ($failure.InnerException -and $failure.InnerException.Message) { $failure.InnerException.Message } else { $failure.Message })
-        $code = $(if ($failure.Response) { [int]$failure.Response.StatusCode } else { 0 })
+
+    if ($null -ne $last) {
+        $code = $last.Code
+        $reason = $last.Reason
         $problem = switch ($code) {
             401 { "o servidor recusou o acesso: confira o link (ele pode ter sido apagado) e a senha do link" }
             403 { "o link não permite enviar arquivos: no Nextcloud, compartilhe a pasta com Solicitar arquivos (ou Permitir envio)" }
@@ -266,9 +291,8 @@ function Send-SnakeOptimizerNextcloudFile {
         }
         return [PSCustomObject]@{ Sent = $false; Problem = $problem }
     }
-    catch {
-        return [PSCustomObject]@{ Sent = $false; Problem = $_.Exception.Message }
-    }
+
+    return [PSCustomObject]@{ Sent = $false; Problem = "o servidor não respondeu" }
 }
 
 

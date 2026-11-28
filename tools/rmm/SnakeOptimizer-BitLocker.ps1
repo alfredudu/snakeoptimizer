@@ -109,24 +109,35 @@ if ($Nextcloud -notmatch '^(?<base>https://[^\s?#]+?)(/index\.php)?/s/(?<token>[
 $base = $Matches['base'].TrimEnd('/')
 $token = $Matches['token']
 
-try {
-    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072
-    $name = (($env:COMPUTERNAME -replace '[^A-Za-z0-9._-]', '_') + "_" + (Get-Date).ToString("yyyy-MM-dd_HHmm") + "_BitLocker.txt")
-    $request = [System.Net.HttpWebRequest]::Create("$base/public.php/webdav/$([Uri]::EscapeDataString($name))")
-    $request.Method = "PUT"
-    $request.Timeout = 30000
-    $request.ContentType = "text/plain; charset=utf-8"
-    $request.UserAgent = "SnakeOptimizer"
-    $request.Headers.Add("X-Requested-With", "XMLHttpRequest")
-    $request.Headers.Add("Authorization", "Basic " + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("${token}:$Senha")))
-    $bytes = (New-Object System.Text.UTF8Encoding $true).GetPreamble() + [Text.Encoding]::UTF8.GetBytes($text)
-    $request.ContentLength = $bytes.Length
-    $stream = $request.GetRequestStream(); $stream.Write($bytes, 0, $bytes.Length); $stream.Close()
-    $response = $request.GetResponse(); $response.Close()
-    Write-Output "Chave enviada para o cofre: $name"
-    if ($missing.Count -gt 0) { exit 1 } else { exit 0 }
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072
+$name = (($env:COMPUTERNAME -replace '[^A-Za-z0-9._-]', '_') + "_" + (Get-Date).ToString("yyyy-MM-dd_HHmm") + "_BitLocker.txt")
+$bytes = (New-Object System.Text.UTF8Encoding $true).GetPreamble() + [Text.Encoding]::UTF8.GetBytes($text)
+# Endereco novo (Nextcloud 29+) e, se nao existir, o antigo. O X-NC-Nickname (nome do PC) e exigido pelo
+# "Solicitar arquivos" do Nextcloud 30+, que guarda cada PC numa subpasta com esse nome.
+$routes = @(
+    @("$base/public.php/dav/files/$token/$([Uri]::EscapeDataString($name))", "anonymous", [bool]$Senha),
+    @("$base/public.php/webdav/$([Uri]::EscapeDataString($name))", $token, $true)
+)
+$problem = ""
+foreach ($route in $routes) {
+    try {
+        $request = [System.Net.HttpWebRequest]::Create($route[0])
+        $request.Method = "PUT"
+        $request.Timeout = 30000
+        $request.ContentType = "text/plain; charset=utf-8"
+        $request.UserAgent = "SnakeOptimizer"
+        $request.Headers.Add("X-Requested-With", "XMLHttpRequest")
+        $request.Headers.Add("X-NC-Nickname", $env:COMPUTERNAME)
+        if ($route[2]) { $request.Headers.Add("Authorization", "Basic " + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("$($route[1]):$Senha"))) }
+        $request.ContentLength = $bytes.Length
+        $stream = $request.GetRequestStream(); $stream.Write($bytes, 0, $bytes.Length); $stream.Close()
+        $response = $request.GetResponse(); $response.Close()
+        Write-Output "Chave enviada para o cofre: $name"
+        if ($missing.Count -gt 0) { exit 1 } else { exit 0 }
+    }
+    catch {
+        $problem = $_.Exception.Message
+    }
 }
-catch {
-    Write-Output (T "N\u00e3o foi poss\u00edvel enviar ao cofre: $($_.Exception.Message)")
-    exit 2
-}
+Write-Output (T "N\u00e3o foi poss\u00edvel enviar ao cofre: $problem")
+exit 2

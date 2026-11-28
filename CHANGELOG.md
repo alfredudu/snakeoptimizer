@@ -1,5 +1,10 @@
 # Histórico de mudanças do SnakeOptimizer
 
+## 1.9.20 — 28/11/2026
+
+- **Telas azuis com o driver culpado (BlueScreenView):** na tela **Diagnóstico > Histórico de telas azuis**, quando há despejos (.dmp) na pasta do Windows, o botão **Descobrir o driver culpado** usa o BlueScreenView, da NirSoft, para ler cada despejo e mostrar o driver que travou (por exemplo, nvlddmkm.sys = driver de vídeo da NVIDIA), o que ele é e o que fazer, além do driver que mais derrubou o PC. **Abrir o BlueScreenView** abre a janela dele. O BlueScreenView é baixado do site oficial na primeira vez que é preciso, só é usado se a assinatura digital for a da NirSoft e fica guardado em `%ProgramData%\SnakeOptimizer\tools`. Despejos antigos aparecem mesmo quando os registros do Windows já foram limpos.
+- **Cofre do BitLocker no Nextcloud 30 ou mais novo:** o envio pelo link de *Solicitar arquivos* agora usa o endereço novo do Nextcloud e manda o nome do PC (o Nextcloud passou a exigir e guarda os arquivos de cada PC numa subpasta com esse nome). Os Nextcloud antigos continuam funcionando. O mesmo vale para o script do RMM.
+
 ## 1.9.19 — 28/11/2026
 
 - **Menu em grupos:** a barra lateral (e o menu do console) agora separa as páginas pelo que você quer fazer: **Cuidar** (Manutenção, Limpeza, Desempenho), **Consertar** (Reparo, Diagnóstico, Rede), **Proteger** (Segurança, Atualizações) e **Configurar** (Programas, Ajustes do Windows, Personalização). Os atalhos Ctrl+1 a Ctrl+0 seguem a nova ordem.
