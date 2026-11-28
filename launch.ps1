@@ -27,8 +27,9 @@
     Run     - modo silencioso para RMM: roda as tarefas de -Task sem perguntar nada. Exige Administrador/SYSTEM.
               Codigo de saida: 0 ok, 1 alertas, 2 falha, 3 sem Administrador, 4 tarefa desconhecida.
     Install   - instala no PC: copia fixa em %ProgramData%\SnakeOptimizer, tarefa "Atualizador" (SYSTEM, ao ligar o PC e a
-                cada 6 horas: baixa a versao nova sozinha) e atalhos na Area de Trabalho publica e no Menu Iniciar.
+                cada hora: baixa a versao nova sozinha) e atalhos na Area de Trabalho publica e no Menu Iniciar.
     Update    - o que o Atualizador roda: so baixa se houver commit novo; com o SnakeOptimizer aberto, deixa para depois.
+                Com o cofre ligado (area tecnica), manda tambem a chave do BitLocker quando ela e nova ou mudou.
     Uninstall - remove o Atualizador, a manutencao automatica, os atalhos e a copia instalada (relatorios e historico ficam).
 
 .PARAMETER Task
@@ -510,7 +511,7 @@ function Start-GuiInUserSession {
 }
 
 function Register-Updater {
-    # Tarefa "Atualizador" (SYSTEM): 3 minutos depois de ligar o PC e a cada 6 horas. Baixa o launcher mais novo do GitHub
+    # Tarefa "Atualizador" (SYSTEM): 3 minutos depois de ligar o PC e a cada hora. Baixa o launcher mais novo do GitHub
     # e roda -Mode Update; sem internet, usa o launcher local (que tambem nao acha nada e sai).
     param ([string]$Root)
 
@@ -525,7 +526,11 @@ function Register-Updater {
     $boot = New-ScheduledTaskTrigger -AtStartup
     $boot.Delay = "PT3M"
     $triggers = @($boot)
-    foreach ($hour in 0, 6, 12, 18) { $triggers += New-ScheduledTaskTrigger -Daily -At ((Get-Date).Date.AddHours($hour)) }
+    # Todo dia a partir da 0h, repetindo de hora em hora (o -Daily sozinho nao repete; a repeticao vem de um gatilho -Once).
+    $hourly = New-ScheduledTaskTrigger -Daily -At ((Get-Date).Date)
+    $hourly.Repetition = (New-ScheduledTaskTrigger -Once -At ((Get-Date).Date) -RepetitionInterval (New-TimeSpan -Hours 1) `
+        -RepetitionDuration (New-TimeSpan -Hours 23 -Minutes 59)).Repetition
+    $triggers += $hourly
     $principal = New-ScheduledTaskPrincipal -UserId "S-1-5-18" -LogonType ServiceAccount -RunLevel Highest
     $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
         -RunOnlyIfNetworkAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 30)
@@ -533,6 +538,42 @@ function Register-Updater {
 
     $task = New-ScheduledTask -Action $taskAction -Trigger $triggers -Principal $principal -Settings $settings -Description $description
     Register-ScheduledTask -TaskPath $TaskPath -TaskName $UpdaterTask -InputObject $task -Force | Out-Null
+}
+
+function Invoke-BitLockerVault {
+    # Chave do BitLocker no cofre (Nextcloud), a cada rodada do Atualizador: so com o cofre ligado na area tecnica e so
+    # quando a chave e nova ou mudou. Roda num PowerShell a parte (com limite de 3 minutos). Devolve o texto para o log, ou
+    # "" quando nao havia nada a fazer.
+    param ([string]$AppDir)
+
+    $moduleRoot = Join-Path $AppDir "modules"
+    if (-not (Test-Path -LiteralPath (Join-Path $moduleRoot "BitLocker.psm1"))) { return "" }
+    if (-not (Test-Path -LiteralPath (Join-Path (Split-Path $AppDir -Parent) "cofre.json"))) { return "" }
+
+    $out = Join-Path $env:TEMP "SnakeOptimizer-cofre-$PID.json"
+    $root = $moduleRoot.Replace("'", "''")
+    $file = $out.Replace("'", "''")
+    $script = "`$ErrorActionPreference = 'SilentlyContinue'; `$m = Import-PowerShellDataFile -LiteralPath (Join-Path '$root' 'Modules.psd1'); " +
+        "foreach (`$n in `$m.Common) { Import-Module -Name (Join-Path '$root' (`$n + '.psm1')) -Force -DisableNameChecking -Global }; " +
+        "if (-not (Get-Command Invoke-SnakeOptimizerBitLockerAutoVault -ErrorAction SilentlyContinue)) { exit 0 }; " +
+        "`$r = Invoke-SnakeOptimizerBitLockerAutoVault; " +
+        "[IO.File]::WriteAllText('$file', ([PSCustomObject]@{ Kind = [string]`$r.Kind; Detail = [string]`$r.Detail } | ConvertTo-Json -Compress), (New-Object Text.UTF8Encoding `$false))"
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($script))
+
+    try {
+        $p = Start-Process -FilePath (Get-WindowsPowerShellPath) -WindowStyle Hidden -PassThru `
+            -ArgumentList @("-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", $encoded)
+        if (-not $p.WaitForExit(180000)) { try { $p.Kill() } catch { }; return "Cofre do BitLocker: demorou demais, tenta na proxima." }
+        if (-not (Test-Path -LiteralPath $out)) { return "" }
+        $r = [IO.File]::ReadAllText($out, [Text.Encoding]::UTF8) | ConvertFrom-Json
+        switch ($r.Kind) {
+            "Ok" { return "Chave do BitLocker guardada no cofre (nova ou mudou)." }
+            "Failed" { return "Chave do BitLocker: $($r.Detail)." }
+            default { return "" }
+        }
+    }
+    catch { return "Cofre do BitLocker: $($_.Exception.Message)" }
+    finally { Remove-Item -LiteralPath $out -Force -ErrorAction SilentlyContinue }
 }
 
 function Get-ShortcutPaths {
@@ -592,7 +633,7 @@ function Install-Machine {
     Write-UpdateLog $Root "Instalado (Atualizador e icone da bandeja ligados)."
 
     Write-Step "Instalado em $Root" Green
-    Write-Step "Atualizador: tarefa $TaskPath$UpdaterTask (SYSTEM), ao ligar o PC e a cada 6 horas." Green
+    Write-Step "Atualizador: tarefa $TaskPath$UpdaterTask (SYSTEM), ao ligar o PC e a cada hora." Green
     foreach ($l in $links) { Write-Step "Atalho: $l" Green }
     Write-Step "Icone na bandeja: abre com o Windows para todos os usuarios$(if ($trayNow) { '; ja aberto agora' } else { '; aparece no proximo logon' })." Green
     Write-Step "Se o icone estiver escondido: clique na setinha ^ perto do relogio e arraste-o para a barra." Gray
@@ -731,6 +772,17 @@ try {
                 $fixed = Repair-MonitorTask -Root $root
                 if ($fixed) { $text += $fixed; [void](Start-AgentInUserSession -Root $root) }
             }
+            # Atualizadores instalados antes da 1.9.21 rodavam a cada 6 horas: passam a rodar de hora em hora.
+            try {
+                $updater = Get-ScheduledTask -TaskPath $TaskPath -TaskName $UpdaterTask -ErrorAction Stop
+                if (-not @($updater.Triggers | Where-Object { $_.Repetition -and [string]$_.Repetition.Interval -eq "PT1H" }).Count) {
+                    Register-Updater -Root $root
+                    $text += " Atualizador passou a rodar de hora em hora."
+                }
+            }
+            catch { }
+            $vault = Invoke-BitLockerVault -AppDir (Join-Path $root "app")
+            if ($vault) { $text += " $vault" }
             Write-UpdateLog $root $text
             Write-Step $text Green
             $global:LASTEXITCODE = $(if ($UpdateInfo.Outcome -in "Updated", "UpToDate") { 0 } else { 1 })

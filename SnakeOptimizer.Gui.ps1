@@ -5672,6 +5672,9 @@ $window.Add_ContentRendered({
     $script:HomeStampTimer.Start()
     $script:MonitorCheckTimer.Start()
 
+    # Chave do BitLocker: com o cofre ligado, manda em segundo plano quando ela é nova ou mudou (sem aviso na tela).
+    if ($isAdmin) { try { [void](Start-SnakeOptimizerBitLockerAutoVault -ModuleRoot $moduleRoot) } catch { } }
+
     if ($script:StartAction) { $script:StartActionTimer.Start() }
 })
 

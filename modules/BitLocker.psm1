@@ -475,6 +475,50 @@ function Invoke-SnakeOptimizerUnattendedBitLockerVault {
 }
 
 
+function Invoke-SnakeOptimizerBitLockerAutoVault {
+    <#
+    Coleta silenciosa (o Atualizador, como SYSTEM, e a janela aberta como Administrador): só com o cofre ligado e só
+    manda quando a chave é nova ou mudou. Não escreve nada na tela; devolve Kind (Ok, Skipped, Failed) e Detail.
+    #>
+    $config = Get-SnakeOptimizerBitLockerVaultConfig
+    if (-not $config.Enabled -or -not $config.Url) { return [PSCustomObject]@{ Kind = "Skipped"; Detail = "cofre não configurado neste PC" } }
+
+    $read = Get-SnakeOptimizerBitLockerKeys
+    if (-not $read.Available) { return [PSCustomObject]@{ Kind = "Skipped"; Detail = "BitLocker não disponível ($($read.Problem))" } }
+
+    return (Send-SnakeOptimizerBitLockerToVault -Volumes $read.Volumes -OnlyIfChanged)
+}
+
+
+function Start-SnakeOptimizerBitLockerAutoVault {
+    <#
+    A coleta silenciosa num PowerShell escondido à parte (a janela não espera o BitLocker nem o Nextcloud). Só sai do
+    lugar com Administrador e o cofre ligado. -ModuleRoot: a pasta modules desta cópia.
+    #>
+    param ([Parameter(Mandatory)][string]$ModuleRoot)
+
+    try {
+        if (-not (Test-SnakeOptimizerAdministrator)) { return $false }
+        $config = Get-SnakeOptimizerBitLockerVaultConfig
+        if (-not $config.Enabled -or -not $config.Url) { return $false }
+
+        $root = $ModuleRoot.Replace("'", "''")
+        $script = "`$ErrorActionPreference = 'SilentlyContinue'; `$m = Import-PowerShellDataFile -LiteralPath (Join-Path '$root' 'Modules.psd1'); " +
+            "foreach (`$n in `$m.Common) { Import-Module -Name (Join-Path '$root' (`$n + '.psm1')) -Force -DisableNameChecking -Global }; " +
+            "[void](Invoke-SnakeOptimizerBitLockerAutoVault)"
+        $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($script))
+        $ps = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+
+        Start-Process -FilePath $ps -ArgumentList @("-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-EncodedCommand", $encoded) -WindowStyle Hidden | Out-Null
+        return $true
+    }
+    catch {
+        Write-Verbose "Cofre automático: $($_.Exception.Message)"
+        return $false
+    }
+}
+
+
 function Invoke-SnakeOptimizerVaultSetup {
     # A parte do cofre na área técnica (a senha técnica já foi conferida por quem chama).
     while ($true) {

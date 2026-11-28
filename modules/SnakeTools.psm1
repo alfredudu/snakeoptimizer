@@ -2254,7 +2254,7 @@ function Show-SnakeOptimizerInstallation {
     <#
     Versão nova e instalação no PC. O SnakeOptimizer não é um serviço do Windows de verdade (é PowerShell, e um serviço
     não mostra janela): a instalação deixa uma cópia fixa em %ProgramData%, a tarefa "Atualizador" (SYSTEM, ao ligar o PC
-    e a cada 6 horas), que faz o papel do serviço, e atalhos que abrem como Administrador e conferem a versão antes de abrir.
+    e a cada hora), que faz o papel do serviço, e atalhos que abrem como Administrador e conferem a versão antes de abrir.
     #>
     param ([switch]$PassThru)
 
@@ -2290,7 +2290,7 @@ function Show-SnakeOptimizerInstallation {
 
     Write-SnakeOptimizerSection -Title "Atualização automática"
     if ($state.Updater) {
-        $value = $(if (-not $state.Enabled) { "desativado no Agendador de Tarefas" } else { "ligado (ao ligar o PC e a cada 6 horas)$(if ($state.LastRun) { "; última: $(Format-SnakeOptimizerDateTime -When $state.LastRun)" })" })
+        $value = $(if (-not $state.Enabled) { "desativado no Agendador de Tarefas" } else { "ligado (ao ligar o PC e a cada hora)$(if ($state.LastRun) { "; última: $(Format-SnakeOptimizerDateTime -When $state.LastRun)" })" })
         Write-SnakeOptimizerKeyValue -Label "Atualizador" -Value $value -LabelWidth 22 -Level $(if ($state.Enabled) { "Normal" } else { "Warn" })
         foreach ($line in $state.LogLines) { Write-SnakeOptimizerStatus -Type Info -Notice -Message $line }
     }
@@ -2314,7 +2314,7 @@ function Show-SnakeOptimizerInstallation {
 
     $options += @(
         @{ Key = "1"; Label = $(if ($state.Updater) { "Reinstalar / reparar a instalação" } else { "Instalar no PC com atualização automática" }); Accent = (-not $state.Updater)
-            Description = "Cópia fixa em $($state.Root), tarefa Atualizador (SYSTEM, ao ligar o PC e a cada 6 horas), ícone na bandeja (perto do relógio) e atalhos na Área de Trabalho e no Menu Iniciar para todos os usuários." },
+            Description = "Cópia fixa em $($state.Root), tarefa Atualizador (SYSTEM, ao ligar o PC e a cada hora), ícone na bandeja (perto do relógio) e atalhos na Área de Trabalho e no Menu Iniciar para todos os usuários." },
         @{ Key = "2"; Label = "Desinstalar do PC"; Description = "Remove o Atualizador, a manutenção automática e os atalhos. Os relatórios e o histórico ficam; a pasta do app sai quando o SnakeOptimizer estiver fechado." },
         @{ Key = "X"; Label = "Voltar"; Exit = $true }
     )

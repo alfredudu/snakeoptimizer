@@ -1,5 +1,9 @@
 # Histórico de mudanças do SnakeOptimizer
 
+## 1.9.21 — 28/11/2026
+
+- **Chave do BitLocker vai sozinha para o cofre:** com o cofre ligado (Área técnica > 9), a chave é conferida a cada rodada do Atualizador (como SYSTEM) e toda vez que a janela abre como Administrador, em segundo plano e sem aviso na tela. Só manda quando a chave é nova ou mudou; sem cofre configurado, nada acontece. O resultado aparece em `%ProgramData%\SnakeOptimizer\atualizador.log` e no "último envio" da tela do BitLocker.
+- **Atualização automática de hora em hora:** a tarefa Atualizador passa a rodar ao ligar o PC e a cada hora (antes, a cada 6 horas). Os PCs já instalados trocam sozinhos na próxima rodada do Atualizador.
 ## 1.9.20 — 28/11/2026
 
 - **Telas azuis com o driver culpado (BlueScreenView):** na tela **Diagnóstico > Histórico de telas azuis**, quando há despejos (.dmp) na pasta do Windows, o botão **Descobrir o driver culpado** usa o BlueScreenView, da NirSoft, para ler cada despejo e mostrar o driver que travou (por exemplo, nvlddmkm.sys = driver de vídeo da NVIDIA), o que ele é e o que fazer, além do driver que mais derrubou o PC. **Abrir o BlueScreenView** abre a janela dele. O BlueScreenView é baixado do site oficial na primeira vez que é preciso, só é usado se a assinatura digital for a da NirSoft e fica guardado em `%ProgramData%\SnakeOptimizer\tools`. Despejos antigos aparecem mesmo quando os registros do Windows já foram limpos.
